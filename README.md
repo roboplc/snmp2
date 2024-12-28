@@ -47,7 +47,7 @@ Currently does not support:
 
 ## GET NEXT
 
-```no_run
+```rust,no_run
 use std::time::Duration;
 use snmp2::{SyncSession, Value, Oid};
 
