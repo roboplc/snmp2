@@ -1,6 +1,6 @@
 [package]
 name = "snmp2"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "SNMP client library"
 authors = ["Serhij S. <div@altertech.com>"]
