@@ -13,31 +13,31 @@ use std::time::Duration;
 pub mod mibs {
     pub use snmptools::Config;
 
-    use crate::{Oid, SnmpResult};
+    use crate::{Oid, Result};
 
     #[inline]
-    pub fn init(config: &Config) -> SnmpResult<()> {
-        snmptools::init(config).map_err(|e| crate::SnmpError::Mib(e.to_string()))
+    pub fn init(config: &Config) -> Result<()> {
+        snmptools::init(config).map_err(|e| crate::Error::Mib(e.to_string()))
     }
 
     pub trait MibConversion {
-        fn mib_name(&self) -> SnmpResult<String>;
-        fn from_mib_name(name: &str) -> SnmpResult<Self>
+        fn mib_name(&self) -> Result<String>;
+        fn from_mib_name(name: &str) -> Result<Self>
         where
             Self: Sized;
     }
 
     impl MibConversion for Oid<'_> {
-        fn mib_name(&self) -> SnmpResult<String> {
-            snmptools::get_name(self).map_err(|e| crate::SnmpError::Mib(e.to_string()))
+        fn mib_name(&self) -> Result<String> {
+            snmptools::get_name(self).map_err(|e| crate::Error::Mib(e.to_string()))
         }
 
-        fn from_mib_name(name: &str) -> SnmpResult<Self>
+        fn from_mib_name(name: &str) -> Result<Self>
         where
             Self: Sized,
         {
             Ok(snmptools::get_oid(name)
-                .map_err(move |e| crate::SnmpError::Mib(e.to_string()))?
+                .map_err(move |e| crate::Error::Mib(e.to_string()))?
                 .to_owned())
         }
     }
@@ -53,11 +53,32 @@ const USIZE_LEN: usize = 8;
 /// SNMP protocol version.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(i64)]
-pub enum SnmpVersion {
+pub enum Version {
     /// SNMPv1
     V1 = 0,
     /// SNMPv2c
     V2C = 1,
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Version::V1 => write!(f, "SNMPv1"),
+            Version::V2C => write!(f, "SNMPv2c"),
+        }
+    }
+}
+
+impl TryFrom<i64> for Version {
+    type Error = Error;
+
+    fn try_from(value: i64) -> Result<Version> {
+        match value {
+            0 => Ok(Version::V1),
+            1 => Ok(Version::V2C),
+            _ => Err(Error::UnsupportedVersion),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -65,7 +86,7 @@ mod tests;
 
 /// SNMP error type.
 #[derive(Debug, PartialEq)]
-pub enum SnmpError {
+pub enum Error {
     /// ASN.1 parsing error.
     AsnParse,
     /// ASN.1 invalid length.
@@ -96,35 +117,35 @@ pub enum SnmpError {
     Mib(String),
 }
 
-impl fmt::Display for SnmpError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SnmpError::AsnParse => write!(f, "ASN.1 parsing error"),
-            SnmpError::AsnInvalidLen => write!(f, "ASN.1 invalid length"),
-            SnmpError::AsnWrongType => write!(f, "ASN.1 wrong type"),
-            SnmpError::AsnUnsupportedType => write!(f, "ASN.1 unsupported type"),
-            SnmpError::AsnEof => write!(f, "ASN.1 unexpected end of file"),
-            SnmpError::AsnIntOverflow => write!(f, "ASN.1 integer overflow"),
-            SnmpError::UnsupportedVersion => write!(f, "Unsupported SNMP version"),
-            SnmpError::RequestIdMismatch => write!(f, "Request ID mismatch"),
-            SnmpError::CommunityMismatch => write!(f, "Community string mismatch"),
-            SnmpError::ValueOutOfRange => write!(f, "Value out of range"),
-            SnmpError::Send => write!(f, "Socket send error"),
-            SnmpError::Receive => write!(f, "Socket receive error"),
-            SnmpError::Mib(ref s) => write!(f, "MIB error: {}", s),
+            Error::AsnParse => write!(f, "ASN.1 parsing error"),
+            Error::AsnInvalidLen => write!(f, "ASN.1 invalid length"),
+            Error::AsnWrongType => write!(f, "ASN.1 wrong type"),
+            Error::AsnUnsupportedType => write!(f, "ASN.1 unsupported type"),
+            Error::AsnEof => write!(f, "ASN.1 unexpected end of file"),
+            Error::AsnIntOverflow => write!(f, "ASN.1 integer overflow"),
+            Error::UnsupportedVersion => write!(f, "Unsupported SNMP version"),
+            Error::RequestIdMismatch => write!(f, "Request ID mismatch"),
+            Error::CommunityMismatch => write!(f, "Community string mismatch"),
+            Error::ValueOutOfRange => write!(f, "Value out of range"),
+            Error::Send => write!(f, "Socket send error"),
+            Error::Receive => write!(f, "Socket receive error"),
+            Error::Mib(ref s) => write!(f, "MIB error: {}", s),
         }
     }
 }
 
-impl std::error::Error for SnmpError {}
+impl std::error::Error for Error {}
 
-impl From<std::num::TryFromIntError> for SnmpError {
-    fn from(_: std::num::TryFromIntError) -> SnmpError {
-        SnmpError::AsnIntOverflow
+impl From<std::num::TryFromIntError> for Error {
+    fn from(_: std::num::TryFromIntError) -> Error {
+        Error::AsnIntOverflow
     }
 }
 
-type SnmpResult<T> = Result<T, SnmpError>;
+type Result<T> = std::result::Result<T, Error>;
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -198,7 +219,7 @@ pub mod snmp {
 pub mod pdu {
     use der_parser::Oid;
 
-    use crate::SnmpVersion;
+    use crate::Version;
 
     use super::{asn1, snmp, Value, BUFFER_SIZE};
     use std::{fmt, mem, ops, ptr};
@@ -458,13 +479,7 @@ pub mod pdu {
         }
     }
 
-    pub fn build_get(
-        version: SnmpVersion,
-        community: &[u8],
-        req_id: i32,
-        oid: &Oid,
-        buf: &mut Buf,
-    ) {
+    pub fn build_get(version: Version, community: &[u8], req_id: i32, oid: &Oid, buf: &mut Buf) {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET, |buf| {
@@ -484,7 +499,7 @@ pub mod pdu {
     }
 
     pub fn build_getnext(
-        version: SnmpVersion,
+        version: Version,
         community: &[u8],
         req_id: i32,
         oid: &Oid,
@@ -509,7 +524,7 @@ pub mod pdu {
     }
 
     pub fn build_getbulk(
-        version: SnmpVersion,
+        version: Version,
         community: &[u8],
         req_id: i32,
         oids: &[&Oid],
@@ -538,7 +553,7 @@ pub mod pdu {
     }
 
     pub fn build_set(
-        version: SnmpVersion,
+        version: Version,
         community: &[u8],
         req_id: i32,
         values: &[(&Oid, Value)],
@@ -580,7 +595,7 @@ pub mod pdu {
     }
 
     pub fn build_response(
-        version: SnmpVersion,
+        version: Version,
         community: &[u8],
         req_id: i32,
         values: &[(&[u32], Value)],
@@ -625,9 +640,9 @@ pub mod pdu {
     }
 }
 
-fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
+fn decode_i64(i: &[u8]) -> Result<i64> {
     if i.len() > mem::size_of::<i64>() {
-        return Err(SnmpError::AsnIntOverflow);
+        return Err(Error::AsnIntOverflow);
     }
     let mut bytes = [0u8; 8];
     bytes[(mem::size_of::<i64>() - i.len())..].copy_from_slice(i);
@@ -673,25 +688,25 @@ impl<'a> AsnReader<'a> {
         AsnReader { inner: bytes }
     }
 
-    pub fn peek_byte(&mut self) -> SnmpResult<u8> {
+    pub fn peek_byte(&mut self) -> Result<u8> {
         if self.inner.is_empty() {
-            Err(SnmpError::AsnEof)
+            Err(Error::AsnEof)
         } else {
             Ok(self.inner[0])
         }
     }
 
-    pub fn read_byte(&mut self) -> SnmpResult<u8> {
+    pub fn read_byte(&mut self) -> Result<u8> {
         match self.inner.split_first() {
             Some((head, tail)) => {
                 self.inner = tail;
                 Ok(*head)
             }
-            _ => Err(SnmpError::AsnEof),
+            _ => Err(Error::AsnEof),
         }
     }
 
-    pub fn read_length(&mut self) -> SnmpResult<usize> {
+    pub fn read_length(&mut self) -> Result<usize> {
         if let Some((head, tail)) = self.inner.split_first() {
             let o: usize;
             if head < &128 {
@@ -700,13 +715,13 @@ impl<'a> AsnReader<'a> {
                 self.inner = tail;
                 Ok(o)
             } else if head == &0xff {
-                Err(SnmpError::AsnInvalidLen) // reserved for future use
+                Err(Error::AsnInvalidLen) // reserved for future use
             } else {
                 // long form
                 let length_len = (*head & 0b0111_1111) as usize;
                 if length_len == 0 {
                     // Indefinite length. Not allowed in DER.
-                    return Err(SnmpError::AsnInvalidLen);
+                    return Err(Error::AsnInvalidLen);
                 }
 
                 let mut bytes = [0u8; USIZE_LEN];
@@ -717,49 +732,49 @@ impl<'a> AsnReader<'a> {
                 Ok(o)
             }
         } else {
-            Err(SnmpError::AsnEof)
+            Err(Error::AsnEof)
         }
     }
 
-    pub fn read_i64_type(&mut self, expected_ident: u8) -> SnmpResult<i64> {
+    pub fn read_i64_type(&mut self, expected_ident: u8) -> Result<i64> {
         let ident = self.read_byte()?;
         if ident != expected_ident {
-            return Err(SnmpError::AsnWrongType);
+            return Err(Error::AsnWrongType);
         }
         let val_len = self.read_length()?;
         if val_len > self.inner.len() {
-            return Err(SnmpError::AsnInvalidLen);
+            return Err(Error::AsnInvalidLen);
         }
         let (val, remaining) = self.inner.split_at(val_len);
         self.inner = remaining;
         decode_i64(val)
     }
 
-    pub fn read_raw(&mut self, expected_ident: u8) -> SnmpResult<&'a [u8]> {
+    pub fn read_raw(&mut self, expected_ident: u8) -> Result<&'a [u8]> {
         let ident = self.read_byte()?;
         if ident != expected_ident {
-            return Err(SnmpError::AsnWrongType);
+            return Err(Error::AsnWrongType);
         }
         let val_len = self.read_length()?;
         if val_len > self.inner.len() {
-            return Err(SnmpError::AsnInvalidLen);
+            return Err(Error::AsnInvalidLen);
         }
         let (val, remaining) = self.inner.split_at(val_len);
         self.inner = remaining;
         Ok(val)
     }
 
-    pub fn read_constructed<F>(&mut self, expected_ident: u8, f: F) -> SnmpResult<()>
+    pub fn read_constructed<F>(&mut self, expected_ident: u8, f: F) -> Result<()>
     where
-        F: Fn(&mut AsnReader) -> SnmpResult<()>,
+        F: Fn(&mut AsnReader) -> Result<()>,
     {
         let ident = self.read_byte()?;
         if ident != expected_ident {
-            return Err(SnmpError::AsnWrongType);
+            return Err(Error::AsnWrongType);
         }
         let seq_len = self.read_length()?;
         if seq_len > self.inner.len() {
-            return Err(SnmpError::AsnInvalidLen);
+            return Err(Error::AsnInvalidLen);
         }
         let (seq_bytes, remaining) = self.inner.split_at(seq_len);
         let mut reader = AsnReader::from_bytes(seq_bytes);
@@ -771,51 +786,51 @@ impl<'a> AsnReader<'a> {
     // ASN
     //
 
-    pub fn read_asn_boolean(&mut self) -> SnmpResult<bool> {
+    pub fn read_asn_boolean(&mut self) -> Result<bool> {
         let ident = self.read_byte()?;
         if ident != asn1::TYPE_NULL {
-            return Err(SnmpError::AsnWrongType);
+            return Err(Error::AsnWrongType);
         }
         let val_len = self.read_length()?;
         if val_len != 1 {
-            return Err(SnmpError::AsnInvalidLen);
+            return Err(Error::AsnInvalidLen);
         }
         match self.read_byte()? {
             0 => Ok(false),
             1 => Ok(true),
-            _ => Err(SnmpError::AsnParse), // DER mandates 1/0 for booleans
+            _ => Err(Error::AsnParse), // DER mandates 1/0 for booleans
         }
     }
 
-    pub fn read_asn_integer(&mut self) -> SnmpResult<i64> {
+    pub fn read_asn_integer(&mut self) -> Result<i64> {
         self.read_i64_type(asn1::TYPE_INTEGER)
     }
 
-    pub fn read_asn_octetstring(&mut self) -> SnmpResult<&'a [u8]> {
+    pub fn read_asn_octetstring(&mut self) -> Result<&'a [u8]> {
         self.read_raw(asn1::TYPE_OCTETSTRING)
     }
 
-    pub fn read_asn_null(&mut self) -> SnmpResult<()> {
+    pub fn read_asn_null(&mut self) -> Result<()> {
         let ident = self.read_byte()?;
         if ident != asn1::TYPE_NULL {
-            return Err(SnmpError::AsnWrongType);
+            return Err(Error::AsnWrongType);
         }
         let null_len = self.read_length()?;
         if null_len != 0 {
-            Err(SnmpError::AsnInvalidLen)
+            Err(Error::AsnInvalidLen)
         } else {
             Ok(())
         }
     }
 
-    pub fn read_asn_objectidentifier(&mut self) -> SnmpResult<Oid<'a>> {
+    pub fn read_asn_objectidentifier(&mut self) -> Result<Oid<'a>> {
         let ident = self.read_byte()?;
         if ident != asn1::TYPE_OBJECTIDENTIFIER {
-            return Err(SnmpError::AsnWrongType);
+            return Err(Error::AsnWrongType);
         }
         let val_len = self.read_length()?;
         if val_len > self.inner.len() {
-            return Err(SnmpError::AsnInvalidLen);
+            return Err(Error::AsnInvalidLen);
         }
         let (input, remaining) = self.inner.split_at(val_len);
         self.inner = remaining;
@@ -823,41 +838,41 @@ impl<'a> AsnReader<'a> {
         Ok(Oid::new(input.into()))
     }
 
-    pub fn read_asn_sequence<F>(&mut self, f: F) -> SnmpResult<()>
+    pub fn read_asn_sequence<F>(&mut self, f: F) -> Result<()>
     where
-        F: Fn(&mut AsnReader) -> SnmpResult<()>,
+        F: Fn(&mut AsnReader) -> Result<()>,
     {
         self.read_constructed(asn1::TYPE_SEQUENCE, f)
     }
 
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    pub fn read_snmp_counter32(&mut self) -> SnmpResult<u32> {
+    pub fn read_snmp_counter32(&mut self) -> Result<u32> {
         self.read_i64_type(snmp::TYPE_COUNTER32).map(|v| v as u32)
     }
 
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    pub fn read_snmp_unsigned32(&mut self) -> SnmpResult<u32> {
+    pub fn read_snmp_unsigned32(&mut self) -> Result<u32> {
         self.read_i64_type(snmp::TYPE_UNSIGNED32).map(|v| v as u32)
     }
 
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    pub fn read_snmp_timeticks(&mut self) -> SnmpResult<u32> {
+    pub fn read_snmp_timeticks(&mut self) -> Result<u32> {
         self.read_i64_type(snmp::TYPE_TIMETICKS).map(|v| v as u32)
     }
 
     #[allow(clippy::cast_sign_loss)]
-    pub fn read_snmp_counter64(&mut self) -> SnmpResult<u64> {
+    pub fn read_snmp_counter64(&mut self) -> Result<u64> {
         self.read_i64_type(snmp::TYPE_COUNTER64).map(|v| v as u64)
     }
 
-    pub fn read_snmp_opaque(&mut self) -> SnmpResult<&'a [u8]> {
+    pub fn read_snmp_opaque(&mut self) -> Result<&'a [u8]> {
         self.read_raw(snmp::TYPE_OPAQUE)
     }
 
-    pub fn read_snmp_ipaddress(&mut self) -> SnmpResult<[u8; 4]> {
+    pub fn read_snmp_ipaddress(&mut self) -> Result<[u8; 4]> {
         let val = self.read_raw(snmp::TYPE_IPADDRESS)?;
         if val.len() != 4 {
-            return Err(SnmpError::AsnInvalidLen);
+            return Err(Error::AsnInvalidLen);
         }
         unsafe { Ok(ptr::read(val.as_ptr().cast())) }
     }
@@ -884,14 +899,14 @@ pub enum Value<'a> {
     NoSuchObject,
     NoSuchInstance,
 
-    SnmpGetRequest(AsnReader<'a>),
-    SnmpGetNextRequest(AsnReader<'a>),
-    SnmpGetBulkRequest(AsnReader<'a>),
-    SnmpResponse(AsnReader<'a>),
-    SnmpSetRequest(AsnReader<'a>),
-    SnmpInformRequest(AsnReader<'a>),
-    SnmpTrap(AsnReader<'a>),
-    SnmpReport(AsnReader<'a>),
+    GetRequest(AsnReader<'a>),
+    GetNextRequest(AsnReader<'a>),
+    GetBulkRequest(AsnReader<'a>),
+    Response(AsnReader<'a>),
+    SetRequest(AsnReader<'a>),
+    InformRequest(AsnReader<'a>),
+    Trap(AsnReader<'a>),
+    Report(AsnReader<'a>),
 }
 
 impl fmt::Debug for Value<'_> {
@@ -918,14 +933,14 @@ impl fmt::Debug for Value<'_> {
             Value::EndOfMibView => write!(f, "END OF MIB VIEW"),
             Value::NoSuchObject => write!(f, "NO SUCH OBJECT"),
             Value::NoSuchInstance => write!(f, "NO SUCH INSTANCE"),
-            Value::SnmpGetRequest(ref val) => write!(f, "SNMP GET REQUEST: {:#?}", val),
-            Value::SnmpGetNextRequest(ref val) => write!(f, "SNMP GET NEXT REQUEST: {:#?}", val),
-            Value::SnmpGetBulkRequest(ref val) => write!(f, "SNMP GET BULK REQUEST: {:#?}", val),
-            Value::SnmpResponse(ref val) => write!(f, "SNMP RESPONSE: {:#?}", val),
-            Value::SnmpSetRequest(ref val) => write!(f, "SNMP SET REQUEST: {:#?}", val),
-            Value::SnmpInformRequest(ref val) => write!(f, "SNMP INFORM REQUEST: {:#?}", val),
-            Value::SnmpTrap(ref val) => write!(f, "SNMP TRAP: {:#?}", val),
-            Value::SnmpReport(ref val) => write!(f, "SNMP REPORT: {:#?}", val),
+            Value::GetRequest(ref val) => write!(f, "SNMP GET REQUEST: {:#?}", val),
+            Value::GetNextRequest(ref val) => write!(f, "SNMP GET NEXT REQUEST: {:#?}", val),
+            Value::GetBulkRequest(ref val) => write!(f, "SNMP GET BULK REQUEST: {:#?}", val),
+            Value::Response(ref val) => write!(f, "SNMP RESPONSE: {:#?}", val),
+            Value::SetRequest(ref val) => write!(f, "SNMP SET REQUEST: {:#?}", val),
+            Value::InformRequest(ref val) => write!(f, "SNMP INFORM REQUEST: {:#?}", val),
+            Value::Trap(ref val) => write!(f, "SNMP TRAP: {:#?}", val),
+            Value::Report(ref val) => write!(f, "SNMP REPORT: {:#?}", val),
         }
     }
 }
@@ -935,7 +950,7 @@ impl<'a> Iterator for AsnReader<'a> {
 
     fn next(&mut self) -> Option<Value<'a>> {
         if let Ok(ident) = self.peek_byte() {
-            let ret: SnmpResult<Value> = match ident {
+            let ret: Result<Value> = match ident {
                 asn1::TYPE_BOOLEAN => self.read_asn_boolean().map(Value::Boolean),
                 asn1::TYPE_NULL => self.read_asn_null().map(|()| Value::Null),
                 asn1::TYPE_INTEGER => self.read_asn_integer().map(Value::Integer),
@@ -957,32 +972,32 @@ impl<'a> Iterator for AsnReader<'a> {
                 snmp::TYPE_COUNTER64 => self.read_snmp_counter64().map(Value::Counter64),
                 snmp::MSG_GET => self
                     .read_raw(ident)
-                    .map(|v| Value::SnmpGetRequest(AsnReader::from_bytes(v))),
+                    .map(|v| Value::GetRequest(AsnReader::from_bytes(v))),
                 snmp::MSG_GET_NEXT => self
                     .read_raw(ident)
-                    .map(|v| Value::SnmpGetNextRequest(AsnReader::from_bytes(v))),
+                    .map(|v| Value::GetNextRequest(AsnReader::from_bytes(v))),
                 snmp::MSG_GET_BULK => self
                     .read_raw(ident)
-                    .map(|v| Value::SnmpGetBulkRequest(AsnReader::from_bytes(v))),
+                    .map(|v| Value::GetBulkRequest(AsnReader::from_bytes(v))),
                 snmp::MSG_RESPONSE => self
                     .read_raw(ident)
-                    .map(|v| Value::SnmpResponse(AsnReader::from_bytes(v))),
+                    .map(|v| Value::Response(AsnReader::from_bytes(v))),
                 snmp::MSG_SET => self
                     .read_raw(ident)
-                    .map(|v| Value::SnmpSetRequest(AsnReader::from_bytes(v))),
+                    .map(|v| Value::SetRequest(AsnReader::from_bytes(v))),
                 snmp::MSG_INFORM => self
                     .read_raw(ident)
-                    .map(|v| Value::SnmpInformRequest(AsnReader::from_bytes(v))),
+                    .map(|v| Value::InformRequest(AsnReader::from_bytes(v))),
                 snmp::MSG_TRAP => self
                     .read_raw(ident)
-                    .map(|v| Value::SnmpTrap(AsnReader::from_bytes(v))),
+                    .map(|v| Value::Trap(AsnReader::from_bytes(v))),
                 snmp::MSG_REPORT => self
                     .read_raw(ident)
-                    .map(|v| Value::SnmpReport(AsnReader::from_bytes(v))),
+                    .map(|v| Value::Report(AsnReader::from_bytes(v))),
                 ident if ident & asn1::CONSTRUCTED == asn1::CONSTRUCTED => self
                     .read_raw(ident)
                     .map(|v| Value::Constructed(ident, AsnReader::from_bytes(v))),
-                _ => Err(SnmpError::AsnUnsupportedType),
+                _ => Err(Error::AsnUnsupportedType),
             };
             ret.ok()
         } else {
@@ -993,7 +1008,7 @@ impl<'a> Iterator for AsnReader<'a> {
 
 /// Synchronous SNMPv2 client.
 pub struct SyncSession {
-    version: SnmpVersion,
+    version: Version,
     socket: UdpSocket,
     community: Vec<u8>,
     req_id: Wrapping<i32>,
@@ -1012,7 +1027,7 @@ impl SyncSession {
         SA: ToSocketAddrs,
     {
         Self::new(
-            SnmpVersion::V1,
+            Version::V1,
             destination,
             community,
             timeout,
@@ -1030,7 +1045,7 @@ impl SyncSession {
         SA: ToSocketAddrs,
     {
         Self::new(
-            SnmpVersion::V2C,
+            Version::V2C,
             destination,
             community,
             timeout,
@@ -1039,7 +1054,7 @@ impl SyncSession {
     }
 
     pub fn new<SA>(
-        version: SnmpVersion,
+        version: Version,
         destination: SA,
         community: &[u8],
         timeout: Option<Duration>,
@@ -1070,18 +1085,18 @@ impl SyncSession {
         })
     }
 
-    fn send_and_recv(socket: &UdpSocket, pdu: &pdu::Buf, out: &mut [u8]) -> SnmpResult<usize> {
+    fn send_and_recv(socket: &UdpSocket, pdu: &pdu::Buf, out: &mut [u8]) -> Result<usize> {
         if let Ok(_pdu_len) = socket.send(&pdu[..]) {
             match socket.recv(out) {
                 Ok(len) => Ok(len),
-                Err(_) => Err(SnmpError::Receive),
+                Err(_) => Err(Error::Receive),
             }
         } else {
-            Err(SnmpError::Send)
+            Err(Error::Send)
         }
     }
 
-    pub fn get(&mut self, oid: &Oid) -> SnmpResult<SnmpPdu> {
+    pub fn get(&mut self, oid: &Oid) -> Result<Pdu> {
         let req_id = self.req_id.0;
         pdu::build_get(
             self.version,
@@ -1093,20 +1108,20 @@ impl SyncSession {
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes, self.version)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
+        let resp = Pdu::from_bytes(pdu_bytes)?;
+        if resp.message_type != MessageType::Response {
+            return Err(Error::AsnWrongType);
         }
         if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
+            return Err(Error::RequestIdMismatch);
         }
         if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
+            return Err(Error::CommunityMismatch);
         }
         Ok(resp)
     }
 
-    pub fn getnext(&mut self, oid: &Oid) -> SnmpResult<SnmpPdu> {
+    pub fn getnext(&mut self, oid: &Oid) -> Result<Pdu> {
         let req_id = self.req_id.0;
         pdu::build_getnext(
             self.version,
@@ -1118,15 +1133,15 @@ impl SyncSession {
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes, self.version)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
+        let resp = Pdu::from_bytes(pdu_bytes)?;
+        if resp.message_type != MessageType::Response {
+            return Err(Error::AsnWrongType);
         }
         if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
+            return Err(Error::RequestIdMismatch);
         }
         if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
+            return Err(Error::CommunityMismatch);
         }
         Ok(resp)
     }
@@ -1136,7 +1151,7 @@ impl SyncSession {
         oids: &[&Oid],
         non_repeaters: u32,
         max_repetitions: u32,
-    ) -> SnmpResult<SnmpPdu> {
+    ) -> Result<Pdu> {
         let req_id = self.req_id.0;
         pdu::build_getbulk(
             self.version,
@@ -1150,15 +1165,15 @@ impl SyncSession {
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes, self.version)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
+        let resp = Pdu::from_bytes(pdu_bytes)?;
+        if resp.message_type != MessageType::Response {
+            return Err(Error::AsnWrongType);
         }
         if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
+            return Err(Error::RequestIdMismatch);
         }
         if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
+            return Err(Error::CommunityMismatch);
         }
         Ok(resp)
     }
@@ -1175,7 +1190,7 @@ impl SyncSession {
     ///   - `Timeticks`
     ///   - `Opaque`
     ///   - `Counter64`
-    pub fn set(&mut self, values: &[(&Oid, Value)]) -> SnmpResult<SnmpPdu> {
+    pub fn set(&mut self, values: &[(&Oid, Value)]) -> Result<Pdu> {
         let req_id = self.req_id.0;
         pdu::build_set(
             self.version,
@@ -1187,65 +1202,72 @@ impl SyncSession {
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes, self.version)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
+        let resp = Pdu::from_bytes(pdu_bytes)?;
+        if resp.message_type != MessageType::Response {
+            return Err(Error::AsnWrongType);
         }
         if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
+            return Err(Error::RequestIdMismatch);
         }
         if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
+            return Err(Error::CommunityMismatch);
         }
         Ok(resp)
     }
 }
 
 #[derive(Debug)]
-pub struct SnmpPdu<'a> {
-    #[allow(dead_code)]
+pub struct Pdu<'a> {
     version: i64,
     community: &'a [u8],
-    pub message_type: SnmpMessageType,
+    pub message_type: MessageType,
     pub req_id: i32,
     pub error_status: u32,
     pub error_index: u32,
     pub varbinds: Varbinds<'a>,
 }
 
-impl<'a> SnmpPdu<'a> {
-    pub fn from_bytes(bytes: &'a [u8], snmp_version: SnmpVersion) -> SnmpResult<SnmpPdu<'a>> {
+impl<'a> Pdu<'a> {
+    pub fn version(&self) -> Result<Version> {
+        self.version.try_into()
+    }
+
+    pub fn community(&self) -> Result<&str> {
+        std::str::from_utf8(self.community).map_err(|_| Error::AsnParse)
+    }
+
+    pub fn from_bytes(bytes: &'a [u8]) -> Result<Pdu<'a>> {
         let seq = AsnReader::from_bytes(bytes).read_raw(asn1::TYPE_SEQUENCE)?;
         let mut rdr = AsnReader::from_bytes(seq);
         let version = rdr.read_asn_integer()?;
-        if version != snmp_version as i64 {
-            return Err(SnmpError::UnsupportedVersion);
+        if version != Version::V1 as i64 && version != Version::V2C as i64 {
+            return Err(Error::UnsupportedVersion);
         }
         let community = rdr.read_asn_octetstring()?;
         let ident = rdr.peek_byte()?;
-        let message_type = SnmpMessageType::from_ident(ident)?;
+        let message_type = MessageType::from_ident(ident)?;
 
         let mut response_pdu = AsnReader::from_bytes(rdr.read_raw(ident)?);
 
         let req_id = response_pdu.read_asn_integer()?;
         if req_id < i64::from(i32::MIN) || req_id > i64::from(i32::MAX) {
-            return Err(SnmpError::ValueOutOfRange);
+            return Err(Error::ValueOutOfRange);
         }
 
         let error_status = response_pdu.read_asn_integer()?;
         if error_status < 0 || error_status > i64::from(i32::MAX) {
-            return Err(SnmpError::ValueOutOfRange);
+            return Err(Error::ValueOutOfRange);
         }
 
         let error_index = response_pdu.read_asn_integer()?;
         if error_index < 0 || error_index > i64::from(i32::MAX) {
-            return Err(SnmpError::ValueOutOfRange);
+            return Err(Error::ValueOutOfRange);
         }
 
         let varbind_bytes = response_pdu.read_raw(asn1::TYPE_SEQUENCE)?;
         let varbinds = Varbinds::from_bytes(varbind_bytes);
 
-        Ok(SnmpPdu {
+        Ok(Pdu {
             version,
             community,
             message_type,
@@ -1257,8 +1279,8 @@ impl<'a> SnmpPdu<'a> {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum SnmpMessageType {
+#[derive(Debug, PartialEq, Copy, Clone, Eq)]
+pub enum MessageType {
     GetRequest,
     GetNextRequest,
     GetBulkRequest,
@@ -1269,18 +1291,18 @@ pub enum SnmpMessageType {
     Report,
 }
 
-impl SnmpMessageType {
-    pub fn from_ident(ident: u8) -> SnmpResult<SnmpMessageType> {
+impl MessageType {
+    pub fn from_ident(ident: u8) -> Result<MessageType> {
         Ok(match ident {
-            snmp::MSG_GET => SnmpMessageType::GetRequest,
-            snmp::MSG_GET_NEXT => SnmpMessageType::GetNextRequest,
-            snmp::MSG_GET_BULK => SnmpMessageType::GetBulkRequest,
-            snmp::MSG_RESPONSE => SnmpMessageType::Response,
-            snmp::MSG_SET => SnmpMessageType::SetRequest,
-            snmp::MSG_INFORM => SnmpMessageType::InformRequest,
-            snmp::MSG_TRAP => SnmpMessageType::Trap,
-            snmp::MSG_REPORT => SnmpMessageType::Report,
-            _ => return Err(SnmpError::AsnWrongType),
+            snmp::MSG_GET => MessageType::GetRequest,
+            snmp::MSG_GET_NEXT => MessageType::GetNextRequest,
+            snmp::MSG_GET_BULK => MessageType::GetBulkRequest,
+            snmp::MSG_RESPONSE => MessageType::Response,
+            snmp::MSG_SET => MessageType::SetRequest,
+            snmp::MSG_INFORM => MessageType::InformRequest,
+            snmp::MSG_TRAP => MessageType::Trap,
+            snmp::MSG_REPORT => MessageType::Report,
+            _ => return Err(Error::AsnWrongType),
         })
     }
 }

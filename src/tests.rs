@@ -1,11 +1,11 @@
 use super::{pdu, snmp, Oid};
-use super::{AsnReader, SnmpError, SnmpVersion};
+use super::{AsnReader, Error, Version};
 
 #[test]
 fn build_getnext_pdu() {
     let mut pdu = pdu::Buf::default();
     pdu::build_getnext(
-        SnmpVersion::V2C,
+        Version::V2C,
         b"tyS0n43d",
         1_251_699_618,
         &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
@@ -33,7 +33,7 @@ fn asn_read_byte() {
     let c = reader.read_byte().unwrap();
     let d = reader.read_byte().unwrap();
     assert_eq!(&[a, b, c, d], &bytes[..]);
-    assert_eq!(reader.read_byte(), Err(SnmpError::AsnEof));
+    assert_eq!(reader.read_byte(), Err(Error::AsnEof));
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn asn_parse_getnext_pdu() {
     reader
         .read_asn_sequence(|rdr| {
             let version = rdr.read_asn_integer()?;
-            assert_eq!(version, SnmpVersion::V2C as i64);
+            assert_eq!(version, Version::V2C as i64);
             let community = rdr.read_asn_octetstring()?;
             assert_eq!(community, b"tyS0n43d");
             println!("version: {}", version);

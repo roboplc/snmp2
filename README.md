@@ -21,6 +21,7 @@ New features added to the fork:
 - Crate code has been refactored and cleaned up
 - OIDs have been migrated to
   [asn1](https://docs.rs/asn1-rs/latest/asn1_rs/struct.Oid.html)
+- Slightly improved PDU API, added a trap example
 
 Supports:
 
@@ -102,6 +103,26 @@ let response = sess.set(&[(&syscontact_oid, contact)]).unwrap();
 assert_eq!(response.error_status, snmp2::snmp::ERRSTATUS_NOERROR);
 for (name, val) in response.varbinds {
     println!("{} => {:?}", name, val);
+}
+```
+
+## TRAPS
+
+```rust,no_run
+use std::net::UdpSocket;
+use snmp2::Pdu;
+
+let socket = UdpSocket::bind("0.0.0.0:1162").expect("Could not bind socket");
+loop {
+    let mut buf = [0; 1500];
+    let size = socket.recv(&mut buf).expect("Could not receive data");
+    let data = &buf[..size];
+    let pdu = Pdu::from_bytes(data).expect("Could not parse PDU");
+    println!("Version: {}", pdu.version().unwrap());
+    println!("Community: {}", pdu.community().unwrap());
+    for (name, value) in pdu.varbinds {
+        println!("{}={:?}", name, value);
+    }
 }
 ```
 
