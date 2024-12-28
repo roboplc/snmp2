@@ -18,8 +18,7 @@ New features added to the fork:
 - MIBs support (requires `libnetsnmp`)
 - Crate code has been refactored and cleaned up
 - OIDs have been migrated to
-  [asn1](https://docs.rs/asn1-rs/latest/asn1_rs/struct.Oid.html) (via
-  [der-parser](https://docs.rs/der-parser))
+  [asn1](https://docs.rs/asn1-rs/latest/asn1_rs/struct.Oid.html)
 
 Supports:
 
