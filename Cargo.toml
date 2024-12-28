@@ -1,6 +1,6 @@
 [package]
 name = "snmp2"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "SNMP client library"
 authors = ["Serhij S. <div@altertech.com>"]
@@ -8,6 +8,12 @@ license = "MIT/Apache-2.0"
 repository = "https://github.com/roboplc/snmp2"
 readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
+
+[package.metadata.docs.rs]
+features = ["full"]
+
+[package.metadata.playground]
+features = []
 
 [dependencies]
 asn1-rs = "0.6"
