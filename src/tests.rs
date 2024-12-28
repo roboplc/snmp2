@@ -78,3 +78,17 @@ fn asn_parse_getnext_pdu() {
         })
         .unwrap();
 }
+
+#[test]
+#[cfg(feature = "mibs")]
+fn test_mib() {
+    use crate::mibs::MibConversion as _;
+
+    super::mibs::init(&super::mibs::Config::new().mibs(&["./ibmConvergedPowerSystems.mib"]))
+        .unwrap();
+    let snmp_oid = Oid::from(&[1, 3, 6, 1, 4, 1, 2, 6, 201, 3]).unwrap();
+    let name = snmp_oid.mib_name().unwrap();
+    assert_eq!(name, "IBM-CPS-MIB::cpsSystemSendTrap");
+    let snmp_oid2 = Oid::from_mib_name(&name).unwrap();
+    assert_eq!(snmp_oid, snmp_oid2);
+}

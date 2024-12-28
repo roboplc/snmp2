@@ -1,3 +1,4 @@
+#![ doc = include_str!( concat!( env!( "CARGO_MANIFEST_DIR" ), "/", "README.md" ) ) ]
 #![allow(unknown_lints, clippy::doc_markdown)]
 
 use std::fmt;
@@ -9,9 +10,40 @@ use std::ptr;
 use std::time::Duration;
 
 #[cfg(feature = "mibs")]
-pub use snmptools::init as init_mibs;
+pub mod mibs {
+    pub use snmptools::Config;
 
-pub use der_parser::Oid;
+    use crate::{Oid, SnmpResult};
+
+    #[inline]
+    pub fn init(config: &Config) -> SnmpResult<()> {
+        snmptools::init(config).map_err(|e| crate::SnmpError::Mib(e.to_string()))
+    }
+
+    pub trait MibConversion {
+        fn mib_name(&self) -> SnmpResult<String>;
+        fn from_mib_name(name: &str) -> SnmpResult<Self>
+        where
+            Self: Sized;
+    }
+
+    impl MibConversion for Oid<'_> {
+        fn mib_name(&self) -> SnmpResult<String> {
+            snmptools::get_name(self).map_err(|e| crate::SnmpError::Mib(e.to_string()))
+        }
+
+        fn from_mib_name(name: &str) -> SnmpResult<Self>
+        where
+            Self: Sized,
+        {
+            Ok(snmptools::get_oid(name)
+                .map_err(move |e| crate::SnmpError::Mib(e.to_string()))?
+                .to_owned())
+        }
+    }
+}
+
+pub use asn1_rs::Oid;
 
 #[cfg(target_pointer_width = "32")]
 const USIZE_LEN: usize = 4;
@@ -35,7 +67,7 @@ mod tests;
 #[derive(Debug, PartialEq)]
 pub enum SnmpError {
     /// ASN.1 parsing error.
-    AsnParseError,
+    AsnParse,
     /// ASN.1 invalid length.
     AsnInvalidLen,
     /// ASN.1 wrong type.
@@ -57,10 +89,34 @@ pub enum SnmpError {
     ValueOutOfRange,
 
     /// Socket send error.
-    SendError,
+    Send,
     /// Socket receive error.
-    ReceiveError,
+    Receive,
+    /// MIB errors
+    Mib(String),
 }
+
+impl fmt::Display for SnmpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SnmpError::AsnParse => write!(f, "ASN.1 parsing error"),
+            SnmpError::AsnInvalidLen => write!(f, "ASN.1 invalid length"),
+            SnmpError::AsnWrongType => write!(f, "ASN.1 wrong type"),
+            SnmpError::AsnUnsupportedType => write!(f, "ASN.1 unsupported type"),
+            SnmpError::AsnEof => write!(f, "ASN.1 unexpected end of file"),
+            SnmpError::AsnIntOverflow => write!(f, "ASN.1 integer overflow"),
+            SnmpError::UnsupportedVersion => write!(f, "Unsupported SNMP version"),
+            SnmpError::RequestIdMismatch => write!(f, "Request ID mismatch"),
+            SnmpError::CommunityMismatch => write!(f, "Community string mismatch"),
+            SnmpError::ValueOutOfRange => write!(f, "Value out of range"),
+            SnmpError::Send => write!(f, "Socket send error"),
+            SnmpError::Receive => write!(f, "Socket receive error"),
+            SnmpError::Mib(ref s) => write!(f, "MIB error: {}", s),
+        }
+    }
+}
+
+impl std::error::Error for SnmpError {}
 
 impl From<std::num::TryFromIntError> for SnmpError {
     fn from(_: std::num::TryFromIntError) -> SnmpError {
@@ -727,7 +783,7 @@ impl<'a> AsnReader<'a> {
         match self.read_byte()? {
             0 => Ok(false),
             1 => Ok(true),
-            _ => Err(SnmpError::AsnParseError), // DER mandates 1/0 for booleans
+            _ => Err(SnmpError::AsnParse), // DER mandates 1/0 for booleans
         }
     }
 
@@ -1018,10 +1074,10 @@ impl SyncSession {
         if let Ok(_pdu_len) = socket.send(&pdu[..]) {
             match socket.recv(out) {
                 Ok(len) => Ok(len),
-                Err(_) => Err(SnmpError::ReceiveError),
+                Err(_) => Err(SnmpError::Receive),
             }
         } else {
-            Err(SnmpError::SendError)
+            Err(SnmpError::Send)
         }
     }
 

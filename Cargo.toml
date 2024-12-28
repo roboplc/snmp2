@@ -10,9 +10,10 @@ readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
 
 [dependencies]
+asn1-rs = "0.6"
 der-parser = "9"
 snmptools = { version = "^0.1.2", optional = true }
 
 [features]
 mibs = ["dep:snmptools"]
-#default = ["mibs"]
+full = ["mibs"]
