@@ -8,6 +8,11 @@ use std::num::Wrapping;
 use std::ptr;
 use std::time::Duration;
 
+#[cfg(feature = "mibs")]
+pub use snmptools::init as init_mibs;
+
+pub use der_parser::Oid;
+
 #[cfg(target_pointer_width = "32")]
 const USIZE_LEN: usize = 4;
 #[cfg(target_pointer_width = "64")]
@@ -135,6 +140,8 @@ pub mod snmp {
 }
 
 pub mod pdu {
+    use der_parser::Oid;
+
     use crate::SnmpVersion;
 
     use super::{asn1, snmp, Value, BUFFER_SIZE};
@@ -399,7 +406,7 @@ pub mod pdu {
         version: SnmpVersion,
         community: &[u8],
         req_id: i32,
-        name: &[u32],
+        oid: &Oid,
         buf: &mut Buf,
     ) {
         buf.reset();
@@ -408,7 +415,7 @@ pub mod pdu {
                 buf.push_sequence(|buf| {
                     buf.push_sequence(|buf| {
                         buf.push_null(); // value
-                        buf.push_object_identifier(name); // name
+                        buf.push_object_identifier_raw(oid.as_bytes()); // name
                     });
                 });
                 buf.push_integer(0); // error index
@@ -424,7 +431,7 @@ pub mod pdu {
         version: SnmpVersion,
         community: &[u8],
         req_id: i32,
-        name: &[u32],
+        oid: &Oid,
         buf: &mut Buf,
     ) {
         buf.reset();
@@ -433,7 +440,7 @@ pub mod pdu {
                 buf.push_sequence(|buf| {
                     buf.push_sequence(|buf| {
                         buf.push_null(); // value
-                        buf.push_object_identifier(name); // name
+                        buf.push_object_identifier_raw(oid.as_bytes()); // name
                     });
                 });
                 buf.push_integer(0); // error index
@@ -449,7 +456,7 @@ pub mod pdu {
         version: SnmpVersion,
         community: &[u8],
         req_id: i32,
-        names: &[&[u32]],
+        oids: &[&Oid],
         non_repeaters: u32,
         max_repetitions: u32,
         buf: &mut Buf,
@@ -458,10 +465,10 @@ pub mod pdu {
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET_BULK, |buf| {
                 buf.push_sequence(|buf| {
-                    for name in names.iter().rev() {
+                    for oid in oids.iter().rev() {
                         buf.push_sequence(|buf| {
                             buf.push_null(); // value
-                            buf.push_object_identifier(name); // name
+                            buf.push_object_identifier_raw(oid.as_bytes()); // name
                         });
                     }
                 });
@@ -478,14 +485,14 @@ pub mod pdu {
         version: SnmpVersion,
         community: &[u8],
         req_id: i32,
-        values: &[(&[u32], Value)],
+        values: &[(&Oid, Value)],
         buf: &mut Buf,
     ) {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_SET, |buf| {
                 buf.push_sequence(|buf| {
-                    for &(name, ref val) in values.iter().rev() {
+                    for &(oid, ref val) in values.iter().rev() {
                         buf.push_sequence(|buf| {
                             match *val {
                                 Value::Boolean(b) => buf.push_boolean(b),
@@ -493,7 +500,7 @@ pub mod pdu {
                                 Value::Integer(i) => buf.push_integer(i),
                                 Value::OctetString(ostr) => buf.push_octet_string(ostr),
                                 Value::ObjectIdentifier(ref objid) => {
-                                    buf.push_object_identifier_raw(objid.raw());
+                                    buf.push_object_identifier_raw(objid.as_bytes());
                                 }
                                 Value::IpAddress(ip) => buf.push_ipaddress(ip),
                                 Value::Counter32(i) => buf.push_counter32(i),
@@ -503,7 +510,7 @@ pub mod pdu {
                                 Value::Counter64(i) => buf.push_counter64(i),
                                 _ => return,
                             }
-                            buf.push_object_identifier(name); // name
+                            buf.push_object_identifier_raw(oid.as_bytes()); // name
                         });
                     }
                 });
@@ -535,7 +542,7 @@ pub mod pdu {
                                 Value::Integer(i) => buf.push_integer(i),
                                 Value::OctetString(ostr) => buf.push_octet_string(ostr),
                                 Value::ObjectIdentifier(ref objid) => {
-                                    buf.push_object_identifier_raw(objid.raw());
+                                    buf.push_object_identifier_raw(objid.as_bytes());
                                 }
                                 Value::IpAddress(ip) => buf.push_ipaddress(ip),
                                 Value::Counter32(i) => buf.push_counter32(i),
@@ -576,104 +583,6 @@ fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
         ret = (ret << shift_amount) >> shift_amount;
     }
     Ok(ret)
-}
-
-/// Wrapper around raw bytes representing an ASN.1 OBJECT IDENTIFIER.
-#[derive(PartialEq)]
-pub struct ObjectIdentifier<'a> {
-    inner: &'a [u8],
-}
-
-impl fmt::Debug for ObjectIdentifier<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_list().entries(self.inner).finish()
-    }
-}
-
-pub type ObjIdBuf = [u32; 128];
-
-impl fmt::Display for ObjectIdentifier<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut buf: ObjIdBuf = [0; 128];
-        let mut first = true;
-        match self.read_name(&mut buf) {
-            Ok(name) => {
-                for subid in name {
-                    if first {
-                        first = false;
-                        f.write_fmt(format_args!("{}", subid))?;
-                    } else {
-                        f.write_fmt(format_args!(".{}", subid))?;
-                    }
-                }
-                Ok(())
-            }
-            Err(err) => f.write_fmt(format_args!("Invalid OID: {:?}", err)),
-        }
-    }
-}
-
-impl PartialEq<[u32]> for ObjectIdentifier<'_> {
-    fn eq(&self, other: &[u32]) -> bool {
-        let mut buf: ObjIdBuf = [0; 128];
-        if let Ok(name) = self.read_name(&mut buf) {
-            name == other
-        } else {
-            false
-        }
-    }
-}
-
-impl PartialEq<&[u32]> for ObjectIdentifier<'_> {
-    fn eq(&self, other: &&[u32]) -> bool {
-        self == *other
-    }
-}
-
-impl<'a> ObjectIdentifier<'a> {
-    fn from_bytes(bytes: &[u8]) -> ObjectIdentifier {
-        ObjectIdentifier { inner: bytes }
-    }
-
-    /// Reads out the OBJECT IDENTIFIER sub-IDs as a slice of u32s.
-    /// Caller must provide storage for 128 sub-IDs.
-    pub fn read_name<'b>(&self, out: &'b mut ObjIdBuf) -> SnmpResult<&'b [u32]> {
-        let input = self.inner;
-        let output = &mut out[..];
-        if input.len() < 2 {
-            return Err(SnmpError::AsnInvalidLen);
-        }
-        let subid1 = u32::from(input[0] / 40);
-        let subid2 = u32::from(input[0] % 40);
-        output[0] = subid1;
-        output[1] = subid2;
-        let mut pos = 2;
-        let mut cur_oid: u32 = 0;
-        let mut is_done = false;
-        for b in &input[1..] {
-            if pos == output.len() {
-                return Err(SnmpError::AsnEof);
-            }
-            is_done = b & 0b1000_0000 == 0;
-            let val = b & 0b0111_1111;
-            cur_oid = cur_oid.checked_shl(7).ok_or(SnmpError::AsnIntOverflow)?;
-            cur_oid |= u32::from(val);
-            if is_done {
-                output[pos] = cur_oid;
-                pos += 1;
-                cur_oid = 0;
-            }
-        }
-        if is_done {
-            Ok(&output[..pos])
-        } else {
-            Err(SnmpError::AsnParseError)
-        }
-    }
-
-    pub fn raw(&self) -> &'a [u8] {
-        self.inner
-    }
 }
 
 /// ASN.1/DER decoder iterator.
@@ -843,7 +752,7 @@ impl<'a> AsnReader<'a> {
         }
     }
 
-    pub fn read_asn_objectidentifier(&mut self) -> SnmpResult<ObjectIdentifier<'a>> {
+    pub fn read_asn_objectidentifier(&mut self) -> SnmpResult<Oid<'a>> {
         let ident = self.read_byte()?;
         if ident != asn1::TYPE_OBJECTIDENTIFIER {
             return Err(SnmpError::AsnWrongType);
@@ -855,7 +764,7 @@ impl<'a> AsnReader<'a> {
         let (input, remaining) = self.inner.split_at(val_len);
         self.inner = remaining;
 
-        Ok(ObjectIdentifier::from_bytes(input))
+        Ok(Oid::new(input.into()))
     }
 
     pub fn read_asn_sequence<F>(&mut self, f: F) -> SnmpResult<()>
@@ -903,7 +812,7 @@ pub enum Value<'a> {
     Null,
     Integer(i64),
     OctetString(&'a [u8]),
-    ObjectIdentifier(ObjectIdentifier<'a>),
+    ObjectIdentifier(Oid<'a>),
     Sequence(AsnReader<'a>),
     Set(AsnReader<'a>),
     Constructed(u8, AsnReader<'a>),
@@ -1116,13 +1025,13 @@ impl SyncSession {
         }
     }
 
-    pub fn get(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
+    pub fn get(&mut self, oid: &Oid) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
         pdu::build_get(
             self.version,
             self.community.as_slice(),
             req_id,
-            name,
+            oid,
             &mut self.send_pdu,
         );
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
@@ -1141,13 +1050,13 @@ impl SyncSession {
         Ok(resp)
     }
 
-    pub fn getnext(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
+    pub fn getnext(&mut self, oid: &Oid) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
         pdu::build_getnext(
             self.version,
             self.community.as_slice(),
             req_id,
-            name,
+            oid,
             &mut self.send_pdu,
         );
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
@@ -1168,7 +1077,7 @@ impl SyncSession {
 
     pub fn getbulk(
         &mut self,
-        names: &[&[u32]],
+        oids: &[&Oid],
         non_repeaters: u32,
         max_repetitions: u32,
     ) -> SnmpResult<SnmpPdu> {
@@ -1177,7 +1086,7 @@ impl SyncSession {
             self.version,
             self.community.as_slice(),
             req_id,
-            names,
+            oids,
             non_repeaters,
             max_repetitions,
             &mut self.send_pdu,
@@ -1210,7 +1119,7 @@ impl SyncSession {
     ///   - `Timeticks`
     ///   - `Opaque`
     ///   - `Counter64`
-    pub fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
+    pub fn set(&mut self, values: &[(&Oid, Value)]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
         pdu::build_set(
             self.version,
@@ -1345,7 +1254,7 @@ impl<'a> Varbinds<'a> {
 }
 
 impl<'a> Iterator for Varbinds<'a> {
-    type Item = (ObjectIdentifier<'a>, Value<'a>);
+    type Item = (Oid<'a>, Value<'a>);
     fn next(&mut self) -> Option<Self::Item> {
         if let Ok(seq) = self.inner.read_raw(asn1::TYPE_SEQUENCE) {
             let mut pair = AsnReader::from_bytes(seq);

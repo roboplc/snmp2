@@ -5,6 +5,14 @@ Dependency-free basic SNMP v1/v2 client in Rust.
 This is a fork of the original [snmp](https://crates.io/crates/snmp) crate
 which has been abandoned long time ago.
 
+New features added to the fork:
+
+- MIBs support (requires `libnetsnmp`)
+- Crate code has been refactored and cleaned up
+- OIDs have been migrated to
+  [asn1](https://docs.rs/asn1-rs/latest/asn1_rs/struct.Oid.html) (via
+  [der-parser](https://docs.rs/der-parser))
+
 Supports:
 
 - GET

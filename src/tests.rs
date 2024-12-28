@@ -1,4 +1,4 @@
-use super::{pdu, snmp};
+use super::{pdu, snmp, Oid};
 use super::{AsnReader, SnmpError, SnmpVersion};
 
 #[test]
@@ -8,7 +8,7 @@ fn build_getnext_pdu() {
         SnmpVersion::V2C,
         b"tyS0n43d",
         1_251_699_618,
-        &[1, 3, 6, 1, 2, 1, 1, 1, 0],
+        &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
         &mut pdu,
     );
 
@@ -68,9 +68,9 @@ fn asn_parse_getnext_pdu() {
                 rdr.read_asn_sequence(|rdr| {
                     rdr.read_asn_sequence(|rdr| {
                         let name = rdr.read_asn_objectidentifier()?;
-                        let expected = [1, 3, 6, 1, 2, 1, 1, 1, 0];
+                        let expected = Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap();
                         println!("name: {}", name);
-                        assert_eq!(name, &expected[..]);
+                        assert_eq!(name, expected);
                         rdr.read_asn_null()
                     })
                 })
