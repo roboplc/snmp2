@@ -1,10 +1,10 @@
 [package]
-name = "snmp"
+name = "snmp2"
 version = "0.2.2"
-authors = ["Hroi Sigurdsson <hroi@asdf.dk>"]
+edition = "2021"
 description = "SNMP client library"
+authors = ["Serhij S. <div@altertech.com>"]
 license = "MIT/Apache-2.0"
-repository = "https://github.com/hroi/rust-snmp"
-documentation = "https://docs.rs/crate/snmp"
+repository = "https://github.com/roboplc/snmp2"
 readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
