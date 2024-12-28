@@ -12,6 +12,8 @@ Dependency-free basic SNMP v1/v2 client in Rust.
 This is a fork of the original [snmp](https://crates.io/crates/snmp) crate
 which has been abandoned long time ago.
 
+SNMP2 is a part of [RoboPLC](https://www.roboplc.com) project.
+
 New features added to the fork:
 
 - SNMP v1 support
