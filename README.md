@@ -1,4 +1,11 @@
-# RUST-SNMP
+<h2>
+  RUST-SNMP
+  <a href="https://crates.io/crates/snmp2"><img alt="crates.io page" src="https://img.shields.io/crates/v/snmp2.svg"></img></a>
+  <a href="https://docs.rs/snmp2"><img alt="docs.rs page" src="https://docs.rs/snmp2/badge.svg"></img></a>
+  <a href="https://github.com/roboplc/snmp2/actions/workflows/ci.yml">
+    <img alt="GitHub Actions CI" src="https://github.com/roboplc/snmp2/actions/workflows/ci.yml/badge.svg"></img>
+  </a>
+</h2>
 
 Dependency-free basic SNMP v1/v2 client in Rust.
 
@@ -23,8 +30,7 @@ Supports:
 - Basic SNMP v1/v2 types
 - Synchronous requests
 - UDP transport
-- MIBs (with `mibs` feature, requires `libnetsnmp`, read more in
-  [snmptools](https://docs.rs/snmptools/latest/snmptools/) docs how to prepare the system)
+- MIBs (with `mibs` feature, requires `libnetsnmp`)
 
 Currently does not support:
 
@@ -100,6 +106,12 @@ for (name, val) in response.varbinds {
 
 ## Working with MIBs
 
+Prepare the system
+
+```shell
+apt-get install libsnmp-dev snmp-mibs-downloader
+```
+
 ```rust,ignore
 use snmp2::{mibs::{self, MibConversion as _}, Oid};
 
@@ -115,10 +127,10 @@ assert_eq!(snmp_oid, snmp_oid2);
 ## Copyright
 
 Copyright 2016 Hroi Sigurdsson
+
 Copyright 2024 Serhij Symonenko, Bohemia Automation Limited
 
-Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-<LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-option. This file may not be copied, modified, or distributed
-except according to those terms.
+Licensed under the [Apache License, Version
+2.0](http://www.apache.org/licenses/LICENSE-2.0) or the [MIT
+license](http://opensource.org/licenses/MIT), at your option. This file may not
+be copied, modified, or distributed except according to those terms.
