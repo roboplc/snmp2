@@ -73,7 +73,7 @@ impl<'a> AsnReader<'a> {
     pub fn read_length(&mut self) -> Result<usize> {
         if let Some((head, tail)) = self.inner.split_first() {
             let o: usize;
-            if head < &128 {
+            if *head < 128 {
                 // short form
                 o = *head as usize;
                 self.inner = tail;
@@ -89,6 +89,12 @@ impl<'a> AsnReader<'a> {
                 }
 
                 let mut bytes = [0u8; USIZE_LEN];
+                if length_len > USIZE_LEN {
+                    return Err(Error::AsnInvalidLen);
+                }
+                if tail.len() < length_len {
+                    return Err(Error::AsnEof);
+                }
                 bytes[(USIZE_LEN - length_len)..].copy_from_slice(&tail[..length_len]);
 
                 o = unsafe { mem::transmute::<[u8; USIZE_LEN], usize>(bytes).to_be() };

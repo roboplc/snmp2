@@ -16,7 +16,7 @@ SNMP2 is a part of [RoboPLC](https://www.roboplc.com) project.
 
 New features added to the fork:
 
-- SNMP v1 support
+- SNMP v1 support (including v1 traps)
 - MIBs support (requires `mibs` feature and `libnetsnmp` library installed)
 - Async session (requires `tokio` feature)
 - Crate code has been refactored and cleaned up

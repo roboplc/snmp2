@@ -2,7 +2,11 @@ use crate::{
     asn1::{self, AsnReader},
     snmp, Error, MessageType, Oid, Result, Value, Varbinds, Version, BUFFER_SIZE,
 };
-use std::{fmt, mem, ops, ptr};
+use std::{
+    fmt, mem,
+    net::{IpAddr, Ipv4Addr},
+    ops, ptr,
+};
 
 pub struct Buf {
     len: usize,
@@ -422,6 +426,16 @@ pub struct Pdu<'a> {
     pub error_status: u32,
     pub error_index: u32,
     pub varbinds: Varbinds<'a>,
+    pub v1_trap_info: Option<V1TrapInfo>,
+}
+
+#[derive(Debug)]
+pub struct V1TrapInfo {
+    pub enterprise: Oid<'static>,
+    pub agent_addr: IpAddr,
+    pub generic_trap: i64,
+    pub specific_trap: i64,
+    pub timestamp: u32,
 }
 
 impl<'a> Pdu<'a> {
@@ -431,6 +445,39 @@ impl<'a> Pdu<'a> {
 
     pub fn community(&self) -> &[u8] {
         self.community
+    }
+
+    fn parse_trap_v1(
+        rdr: &mut AsnReader<'a>,
+        version: i64,
+        community: &'a [u8],
+    ) -> Result<Pdu<'a>> {
+        if version != Version::V1 as i64 {
+            return Err(Error::AsnWrongType);
+        }
+        let oid = rdr.read_asn_objectidentifier()?;
+        let addr = IpAddr::V4(Ipv4Addr::from(rdr.read_snmp_ipaddress()?));
+        let generic_type = rdr.read_asn_integer()?;
+        let specific_code = rdr.read_asn_integer()?;
+        let timestamp = rdr.read_snmp_timeticks()?;
+        let varbind_bytes = rdr.read_raw(asn1::TYPE_SEQUENCE)?;
+        let varbinds = Varbinds::from_bytes(varbind_bytes);
+        Ok(Pdu {
+            version,
+            community,
+            message_type: MessageType::TrapV1,
+            req_id: 0,
+            error_status: 0,
+            error_index: 0,
+            varbinds,
+            v1_trap_info: Some(V1TrapInfo {
+                enterprise: oid.to_owned(),
+                agent_addr: addr,
+                generic_trap: generic_type,
+                specific_trap: specific_code,
+                timestamp,
+            }),
+        })
     }
 
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Pdu<'a>> {
@@ -445,6 +492,10 @@ impl<'a> Pdu<'a> {
         let message_type = MessageType::from_ident(ident)?;
 
         let mut response_pdu = AsnReader::from_bytes(rdr.read_raw(ident)?);
+
+        if message_type == MessageType::TrapV1 {
+            return Self::parse_trap_v1(&mut response_pdu, version, community);
+        }
 
         let req_id = response_pdu.read_asn_integer()?;
         if req_id < i64::from(i32::MIN) || req_id > i64::from(i32::MAX) {
@@ -472,6 +523,7 @@ impl<'a> Pdu<'a> {
             error_status: u32::try_from(error_status)?,
             error_index: u32::try_from(error_index)?,
             varbinds,
+            v1_trap_info: None,
         })
     }
     pub fn validate(

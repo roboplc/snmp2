@@ -261,6 +261,7 @@ pub enum MessageType {
     SetRequest,
     InformRequest,
     Trap,
+    TrapV1,
     Report,
 }
 
@@ -275,6 +276,7 @@ impl MessageType {
             snmp::MSG_INFORM => MessageType::InformRequest,
             snmp::MSG_TRAP => MessageType::Trap,
             snmp::MSG_REPORT => MessageType::Report,
+            snmp::MSG_TRAP_V1 => MessageType::TrapV1,
             _ => return Err(Error::AsnWrongType),
         })
     }
