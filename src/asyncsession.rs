@@ -10,7 +10,7 @@ use crate::{
 };
 use tokio::net::UdpSocket;
 
-/// Asynchronous SNMP client.
+/// Asynchronous SNMP client
 pub struct AsyncSession {
     version: Version,
     socket: UdpSocket,

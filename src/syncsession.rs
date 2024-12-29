@@ -10,7 +10,7 @@ use crate::{
     Error, MessageType, Oid, Result, Value, Version, BUFFER_SIZE,
 };
 
-/// Synchronous SNMPv2 client.
+/// Synchronous SNMP client
 pub struct SyncSession {
     version: Version,
     socket: UdpSocket,
