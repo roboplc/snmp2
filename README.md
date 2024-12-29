@@ -166,6 +166,10 @@ let snmp_oid2 = Oid::from_mib_name(&name).unwrap();
 assert_eq!(snmp_oid, snmp_oid2);
 ```
 
+## MSRV
+
+1.68.0
+
 ## Copyright
 
 Copyright 2016 Hroi Sigurdsson
