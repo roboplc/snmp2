@@ -420,7 +420,7 @@ pub fn build_response(
 #[derive(Debug)]
 pub struct Pdu<'a> {
     version: i64,
-    community: &'a [u8],
+    pub community: &'a [u8],
     pub message_type: MessageType,
     pub req_id: i32,
     pub error_status: u32,
@@ -441,10 +441,6 @@ pub struct V1TrapInfo {
 impl<'a> Pdu<'a> {
     pub fn version(&self) -> Result<Version> {
         self.version.try_into()
-    }
-
-    pub fn community(&self) -> &[u8] {
-        self.community
     }
 
     fn parse_trap_v1(

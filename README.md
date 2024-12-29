@@ -119,7 +119,7 @@ loop {
     let data = &buf[..size];
     let pdu = Pdu::from_bytes(data).expect("Could not parse PDU");
     println!("Version: {}", pdu.version().unwrap());
-    println!("Community: {}", std::str::from_utf8(pdu.community()).unwrap());
+    println!("Community: {}", std::str::from_utf8(pdu.community).unwrap());
     for (name, value) in pdu.varbinds {
         println!("{}={:?}", name, value);
     }
