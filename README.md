@@ -31,7 +31,7 @@ Supports:
 - GETBULK
 - SET
 - Basic SNMP v1/v2 types
-- Synchronous requests
+- Synchronous/Asynchronous requests
 - UDP transport
 - MIBs (with `mibs` feature, requires `libnetsnmp`)
 
