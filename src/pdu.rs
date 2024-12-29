@@ -417,7 +417,7 @@ pub fn build_response(
     });
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pdu<'a> {
     version: i64,
     pub community: &'a [u8],
@@ -426,12 +426,12 @@ pub struct Pdu<'a> {
     pub error_status: u32,
     pub error_index: u32,
     pub varbinds: Varbinds<'a>,
-    pub v1_trap_info: Option<V1TrapInfo>,
+    pub v1_trap_info: Option<V1TrapInfo<'a>>,
 }
 
-#[derive(Debug)]
-pub struct V1TrapInfo {
-    pub enterprise: Oid<'static>,
+#[derive(Debug, Clone)]
+pub struct V1TrapInfo<'a> {
+    pub enterprise: Oid<'a>,
     pub agent_addr: IpAddr,
     pub generic_trap: i64,
     pub specific_trap: i64,
@@ -467,7 +467,7 @@ impl<'a> Pdu<'a> {
             error_index: 0,
             varbinds,
             v1_trap_info: Some(V1TrapInfo {
-                enterprise: oid.to_owned(),
+                enterprise: oid,
                 agent_addr: addr,
                 generic_trap: generic_type,
                 specific_trap: specific_code,
