@@ -41,7 +41,6 @@ Currently does not support:
 
 ## TODO
 
-- Transport-agnostic API
 - SNMPv3
 
 
