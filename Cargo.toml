@@ -17,9 +17,13 @@ features = []
 
 [dependencies]
 asn1-rs = "0.6"
-der-parser = "9"
 snmptools = { version = "^0.1.2", optional = true }
+tokio = { version = "1.36", features = ["net"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "=1.36" }
 
 [features]
 mibs = ["dep:snmptools"]
-full = ["mibs"]
+tokio = ["dep:tokio"]
+full = ["mibs", "tokio"]

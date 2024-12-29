@@ -17,7 +17,8 @@ SNMP2 is a part of [RoboPLC](https://www.roboplc.com) project.
 New features added to the fork:
 
 - SNMP v1 support
-- MIBs support (requires `libnetsnmp`)
+- MIBs support (requires `mibs` feature and `libnetsnmp` library installed)
+- Async session (requires `tokio` feature)
 - Crate code has been refactored and cleaned up
 - OIDs have been migrated to
   [asn1](https://docs.rs/asn1-rs/latest/asn1_rs/struct.Oid.html)
@@ -119,9 +120,28 @@ loop {
     let data = &buf[..size];
     let pdu = Pdu::from_bytes(data).expect("Could not parse PDU");
     println!("Version: {}", pdu.version().unwrap());
-    println!("Community: {}", pdu.community().unwrap());
+    println!("Community: {}", std::str::from_utf8(pdu.community()).unwrap());
     for (name, value) in pdu.varbinds {
         println!("{}={:?}", name, value);
+    }
+}
+```
+
+## Async session
+
+```rust,no_run
+use std::time::Duration;
+use snmp2::{AsyncSession, Value, Oid};
+
+async fn get_next() {
+    // timeouts should be handled by the caller with `tokio::time::timeout`
+    let sys_descr_oid = Oid::from(&[1,3,6,1,2,1,1,1,]).unwrap();
+    let agent_addr    = "198.51.100.123:161";
+    let community     = b"f00b4r";
+    let mut sess = AsyncSession::new_v2c(agent_addr, community, 0).await.unwrap();
+    let mut response = sess.getnext(&sys_descr_oid).await.unwrap();
+    if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
+        println!("myrouter sysDescr: {}", String::from_utf8_lossy(sys_descr));
     }
 }
 ```
