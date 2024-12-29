@@ -1,8 +1,8 @@
 [package]
 name = "snmp2"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
-description = "SNMP client library"
+description = "SNMP v1/v2 sync/async client library with traps and MIB support"
 authors = ["Serhij S. <div@altertech.com>"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/roboplc/snmp2"
