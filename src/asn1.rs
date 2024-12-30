@@ -129,6 +129,7 @@ impl<'a> AsnReader<'a> {
         if val_len > self.inner.len() {
             return Err(Error::AsnInvalidLen);
         }
+        //dbg!(self.inner.len());
         let (val, remaining) = self.inner.split_at(val_len);
         self.inner = remaining;
         Ok(val)
@@ -245,6 +246,10 @@ impl<'a> AsnReader<'a> {
             return Err(Error::AsnInvalidLen);
         }
         unsafe { Ok(ptr::read(val.as_ptr().cast())) }
+    }
+
+    pub fn bytes_left(&self) -> usize {
+        self.inner.len()
     }
 }
 

@@ -1,8 +1,8 @@
 [package]
 name = "snmp2"
-version = "0.3.8"
+version = "0.4.0"
 edition = "2021"
-description = "SNMP v1/v2 sync/async client library with traps and MIB support"
+description = "SNMP v1/v2/v3 sync/async client library with traps and MIB support"
 authors = ["Serhij S. <div@altertech.com>"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/roboplc/snmp2"
@@ -10,15 +10,16 @@ readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
 
 [package.metadata.docs.rs]
-features = ["full"]
+features = ["full", "openssl/vendored"]
 
 [package.metadata.playground]
-features = []
+features = ["v3", "tokio", "openssl/vendored"]
 
 [dependencies]
 asn1-rs = "0.6"
 snmptools = { version = "^0.1.2", optional = true }
 tokio = { version = "1.36", features = ["net"], optional = true }
+openssl = { version = "0.10", optional = true }
 
 [dev-dependencies]
 tokio = { version = "=1.36" }
@@ -26,4 +27,5 @@ tokio = { version = "=1.36" }
 [features]
 mibs = ["dep:snmptools"]
 tokio = ["dep:tokio"]
-full = ["mibs", "tokio"]
+v3 = ["openssl"]
+full = ["mibs", "tokio", "v3"]

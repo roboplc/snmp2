@@ -3,13 +3,15 @@
 
 use std::fmt;
 
-mod asn1;
+pub mod asn1;
 pub use asn1::AsnReader;
 #[cfg(feature = "mibs")]
 pub mod mibs;
 pub mod pdu;
 pub mod snmp;
 mod syncsession;
+#[cfg(feature = "v3")]
+pub mod v3;
 pub use syncsession::SyncSession;
 #[cfg(feature = "tokio")]
 mod asyncsession;
@@ -33,6 +35,8 @@ pub enum Version {
     V1 = 0,
     /// SNMPv2c
     V2C = 1,
+    /// SNMPv3
+    V3 = 3,
 }
 
 impl fmt::Display for Version {
@@ -40,6 +44,7 @@ impl fmt::Display for Version {
         match *self {
             Version::V1 => write!(f, "SNMPv1"),
             Version::V2C => write!(f, "SNMPv2c"),
+            Version::V3 => write!(f, "SNMPv3"),
         }
     }
 }
@@ -51,6 +56,7 @@ impl TryFrom<i64> for Version {
         match value {
             0 => Ok(Version::V1),
             1 => Ok(Version::V2C),
+            3 => Ok(Version::V3),
             _ => Err(Error::UnsupportedVersion),
         }
     }
@@ -60,7 +66,7 @@ impl TryFrom<i64> for Version {
 mod tests;
 
 /// SNMP error type.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Error {
     /// ASN.1 parsing error.
     AsnParse,
@@ -84,6 +90,16 @@ pub enum Error {
     /// Value out of range.
     ValueOutOfRange,
 
+    /// Authentication failure
+    #[cfg(feature = "v3")]
+    AuthFailure(v3::AuthErrorKind),
+    /// OpenSSL errors
+    #[cfg(feature = "v3")]
+    Crypto(String),
+    /// Security context has been updated, repeat the request
+    #[cfg(feature = "v3")]
+    AuthUpdated,
+
     /// Socket send error.
     Send,
     /// Socket receive error.
@@ -105,10 +121,25 @@ impl fmt::Display for Error {
             Error::RequestIdMismatch => write!(f, "Request ID mismatch"),
             Error::CommunityMismatch => write!(f, "Community string mismatch"),
             Error::ValueOutOfRange => write!(f, "Value out of range"),
+            #[cfg(feature = "v3")]
+            Error::AuthFailure(err) => write!(f, "Authentication failure: {}", err),
+            #[cfg(feature = "v3")]
+            Error::Crypto(e) => write!(f, "Cryptographic engine error: {}", e),
+            #[cfg(feature = "v3")]
+            Error::AuthUpdated => {
+                write!(f, "Security context has been updated, repeat the request")
+            }
             Error::Send => write!(f, "Socket send error"),
             Error::Receive => write!(f, "Socket receive error"),
             Error::Mib(ref s) => write!(f, "MIB error: {}", s),
         }
+    }
+}
+
+#[cfg(feature = "v3")]
+impl From<openssl::error::ErrorStack> for Error {
+    fn from(err: openssl::error::ErrorStack) -> Error {
+        Error::Crypto(err.to_string())
     }
 }
 
@@ -299,7 +330,7 @@ impl fmt::Debug for Varbinds<'_> {
 }
 
 impl<'a> Varbinds<'a> {
-    fn from_bytes(bytes: &'a [u8]) -> Varbinds<'a> {
+    pub fn from_bytes(bytes: &'a [u8]) -> Varbinds<'a> {
         Varbinds {
             inner: AsnReader::from_bytes(bytes),
         }

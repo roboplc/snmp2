@@ -7,7 +7,7 @@
   </a>
 </h2>
 
-Dependency-free basic SNMP v1/v2 client in Rust.
+Dependency-free basic SNMP v1/v2/v3 client in Rust.
 
 This is a fork of the original [snmp](https://crates.io/crates/snmp) crate
 which has been abandoned long time ago.
@@ -17,12 +17,14 @@ SNMP2 is a part of [RoboPLC](https://www.roboplc.com) project.
 New features added to the fork:
 
 - SNMP v1 support (including v1 traps)
+- SNMP v3 authentication (MD5, SHA1, SHA224, SHA256, SHA384, SHA512)
+- SNMP v3 privacy (DES, AES128, AES192, AES256)
 - MIBs support (requires `mibs` feature and `libnetsnmp` library installed)
 - Async session (requires `tokio` feature)
 - Crate code has been refactored and cleaned up
 - OIDs have been migrated to
   [asn1](https://docs.rs/asn1-rs/latest/asn1_rs/struct.Oid.html)
-- Slightly improved PDU API, added a trap example
+- Improved PDU API, added trap handling examples
 
 Supports:
 
@@ -34,15 +36,7 @@ Supports:
 - Synchronous/Asynchronous requests
 - UDP transport
 - MIBs (with `mibs` feature, requires `libnetsnmp`)
-
-Currently does not support:
-
-- SNMPv3
-
-## TODO
-
-- SNMPv3
-
+- SNMP v3 (requires `v3` feature)
 
 # Examples
 
@@ -165,15 +159,81 @@ let snmp_oid2 = Oid::from_mib_name(&name).unwrap();
 assert_eq!(snmp_oid, snmp_oid2);
 ```
 
+# SNMPv3
+
+* Requires `v3` crate feature.
+
+* All cryptographic algorithms are provided by [openssl](https://www.openssl.org/).
+
+* For authentication, supports: MD5 (RFC3414), SHA1 (RFC3414) and non-standard
+  SHA224, SHA256, SHA384, SHA512.
+
+* For privacy, supports: DES (RFC3414), AES128-CFB (RFC3826) and non-standard
+  AES192-CFB, AES256-CFB. Additional/different AES modes are not supported and
+  may require patching the crate.
+
+## Example
+
+Authentication: SHA1, encryption: AES128-CFB
+
+```rust,no_run
+use snmp2::{SyncSession, v3, Oid};
+use std::time::Duration;
+
+// the security parameters also keep authoritative engine ID and boot/time
+// counters. these can be either set or resolved/updated automatically.
+let security = v3::Security::new(b"public", b"secure")
+    .with_auth_protocol(v3::AuthProtocol::Sha1)
+    .with_auth(v3::Auth::AuthPriv {
+        cipher: v3::Cipher::Aes128,
+        privacy_password: b"secure-encrypt".to_vec(),
+    });
+let mut sess =
+    SyncSession::new_v3("192.168.1.1:161", Some(Duration::from_secs(2)), 0, security).unwrap();
+// In case if engine_id is not provided in security parameters, it is necessary
+// to call init() method to send a blank unauthenticated request to the target
+// to get the engine_id.
+sess.init().unwrap();
+loop {
+    let res = match sess.get(&Oid::from(&[1, 3, 6, 1, 2, 1, 1, 3, 0]).unwrap()) {
+        Ok(r) => r,
+        // In case if the engine boot / time counters are not set in the security parameters or
+        // they have been changed on the target, e.g. after a reboot, the session returns
+        // an error with the AuthUpdated code. In this case, security parameters are automatically
+        // updated and the request should be repeated.
+        Err(snmp2::Error::AuthUpdated) => continue,
+        Err(e) => panic!("{}", e),
+    };
+    println!("{} {:?}", res.version().unwrap(), res.varbinds);
+    std::thread::sleep(Duration::from_secs(1));
+}
+```
+
+## Building
+
+In case of problems (e.g. with [cross-rs](https://github.com/cross-rs/cross)),
+add `openssl` with `vendored` feature:
+
+```shell
+cargo add openssl --features vendored
+```
+
+## FIPS-140 support
+
+The crate uses openssl cryptography only and becomes FIPS-140 compliant as soon
+as FIPS mode is activated in `openssl`. Refer to the
+[openssl crate](https://docs.rs/openssl) crate and
+[openssl library](https://www.openssl.org/) documentation for more details.
+
 ## MSRV
 
 1.68.0
 
 ## Copyright
 
-Copyright 2016 Hroi Sigurdsson
+Copyright 2016-2018 Hroi Sigurdsson
 
-Copyright 2024 Serhij Symonenko, Bohemia Automation Limited
+Copyright 2024 Serhij Symonenko, [Bohemia Automation Limited](https://www.bohemia-automation.com)
 
 Licensed under the [Apache License, Version
 2.0](http://www.apache.org/licenses/LICENSE-2.0) or the [MIT

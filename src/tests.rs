@@ -10,7 +10,10 @@ fn build_getnext_pdu() {
         1_251_699_618,
         &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
         &mut pdu,
-    );
+        #[cfg(feature = "v3")]
+        None,
+    )
+    .unwrap();
 
     let expected = &[
         0x30, 0x2b, 0x02, 0x01, 0x01, 0x04, 0x08, 0x74, 0x79, 0x53, 0x30, 0x6e, 0x34, 0x33, 0x64,
