@@ -201,6 +201,8 @@ impl Security {
     }
     pub fn reset_engine_id(&mut self) {
         self.authoritative_state.engine_id.clear();
+        self.authoritative_state.auth_key.clear();
+        self.authoritative_state.priv_key.clear();
     }
     pub fn reset_engine_counters(&mut self) {
         self.authoritative_state.engine_boots = 0;
@@ -538,7 +540,13 @@ impl<'a> Pdu<'a> {
                 return Err(Error::AuthFailure(AuthErrorKind::UsernameMismatch));
             }
 
-            if engine_id.is_empty() || engine_id != security.authoritative_state.engine_id {
+            if engine_id.is_empty() {
+                return Err(Error::AuthFailure(AuthErrorKind::NotAuthenticated));
+            }
+            if security.authoritative_state.engine_id.is_empty() {
+                security.authoritative_state.engine_id = engine_id.to_vec();
+                security.update_key()?;
+            } else if dbg!(engine_id) != dbg!(&security.authoritative_state.engine_id) {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineIdMismatch));
             }
             if auth_params.len() != 12 || auth_params_pos + auth_params.len() > bytes.len() {
