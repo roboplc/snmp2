@@ -546,7 +546,7 @@ impl<'a> Pdu<'a> {
             if security.authoritative_state.engine_id.is_empty() {
                 security.authoritative_state.engine_id = engine_id.to_vec();
                 security.update_key()?;
-            } else if dbg!(engine_id) != dbg!(&security.authoritative_state.engine_id) {
+            } else if engine_id != security.authoritative_state.engine_id {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineIdMismatch));
             }
             if auth_params.len() != 12 || auth_params_pos + auth_params.len() > bytes.len() {
