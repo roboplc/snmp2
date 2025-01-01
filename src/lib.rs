@@ -89,6 +89,8 @@ pub enum Error {
     CommunityMismatch,
     /// Value out of range.
     ValueOutOfRange,
+    /// Buffer overflow.
+    BufferOverflow,
 
     /// Authentication failure
     #[cfg(feature = "v3")]
@@ -121,6 +123,7 @@ impl fmt::Display for Error {
             Error::RequestIdMismatch => write!(f, "Request ID mismatch"),
             Error::CommunityMismatch => write!(f, "Community string mismatch"),
             Error::ValueOutOfRange => write!(f, "Value out of range"),
+            Error::BufferOverflow => write!(f, "Buffer overflow"),
             #[cfg(feature = "v3")]
             Error::AuthFailure(err) => write!(f, "Authentication failure: {}", err),
             #[cfg(feature = "v3")]

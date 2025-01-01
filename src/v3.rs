@@ -480,7 +480,7 @@ impl<'a> Pdu<'a> {
         let msg_id = global_data_rdr.read_asn_integer()?;
         let max_size = global_data_rdr.read_asn_integer()?;
         if max_size > BUFFER_SIZE as i64 {
-            return Err(Error::ValueOutOfRange);
+            return Err(Error::BufferOverflow);
         }
         let flags = global_data_rdr
             .read_asn_octetstring()?
