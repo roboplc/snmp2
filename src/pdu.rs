@@ -609,7 +609,7 @@ impl<'a> Pdu<'a> {
             v3_msg_id: 0,
         })
     }
-    pub fn validate(
+    pub(crate) fn validate(
         &self,
         expected_type: MessageType,
         expected_req_id: i32,

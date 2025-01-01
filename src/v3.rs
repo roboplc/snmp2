@@ -58,7 +58,7 @@ impl fmt::Display for AuthErrorKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct AuthoritativeState {
+pub(crate) struct AuthoritativeState {
     auth_key: Vec<u8>,
     priv_key: Vec<u8>,
     pub(crate) engine_id: Vec<u8>,
