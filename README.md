@@ -172,6 +172,9 @@ assert_eq!(snmp_oid, snmp_oid2);
   AES192-CFB, AES256-CFB. Additional/different AES modes are not supported and
   may require patching the crate.
 
+Note: DES legacy encryption may be disabled in openssl by default or even not
+supported at all. Refer to the library documentation how to enable it.
+
 ## Example
 
 Authentication: SHA1, encryption: AES128-CFB
