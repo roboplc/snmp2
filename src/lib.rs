@@ -153,7 +153,7 @@ impl From<std::num::TryFromIntError> for Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-const BUFFER_SIZE: usize = 4096;
+const BUFFER_SIZE: usize = 65_507;
 
 pub enum Value<'a> {
     Boolean(bool),
