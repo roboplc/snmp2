@@ -362,8 +362,8 @@ pub(crate) fn build_inner(
                 });
             }
         });
-        buf.push_integer(max_repetitions.into());
         buf.push_integer(non_repeaters.into());
+        buf.push_integer(max_repetitions.into());
         buf.push_integer(i64::from(req_id));
     });
 }

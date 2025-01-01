@@ -1,3 +1,5 @@
+use crate::{MessageType, Pdu, Value};
+
 use super::{pdu, snmp, Oid};
 use super::{AsnReader, Error, Version};
 
@@ -25,6 +27,55 @@ fn build_getnext_pdu() {
     println!("{:?}", &expected[..]);
 
     assert_eq!(&pdu[..], &expected[..]);
+}
+
+#[test]
+fn build_getbulk_pdu() {
+    let mut pdu = pdu::Buf::default();
+    pdu::build_getbulk(
+        Version::V2C,
+        b"tyS0n43d",
+        1_251_699_618,
+        &[&Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap()],
+        5,
+        10,
+        &mut pdu,
+        #[cfg(feature = "v3")]
+        None,
+    )
+    .unwrap();
+
+    let expected = &[
+        48, 43, 2, 1, 1, 4, 8, 116, 121, 83, 48, 110, 52, 51, 100, 165, 28, 2, 4, 74, 155, 107,
+        162, 2, 1, 5, 2, 1, 10, 48, 14, 48, 12, 6, 8, 43, 6, 1, 2, 1, 1, 1, 0, 5, 0,
+    ];
+
+    assert_eq!(&pdu[..], &expected[..]);
+}
+
+#[test]
+fn build_reply_pdu() {
+    let mut buf = pdu::Buf::default();
+    pdu::build(
+        Version::V2C,
+        b"tyS0n43d",
+        snmp::MSG_RESPONSE,
+        1_251_699_618,
+        &[(
+            &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+            Value::Null,
+        )],
+        8,
+        1,
+        &mut buf,
+        #[cfg(feature = "v3")]
+        None,
+    )
+    .unwrap();
+    let pdu = Pdu::from_bytes(&buf).unwrap();
+    assert_eq!(pdu.message_type, MessageType::Response);
+    assert_eq!(pdu.error_status, 8);
+    assert_eq!(pdu.error_index, 1);
 }
 
 #[test]
