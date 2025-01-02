@@ -645,7 +645,7 @@ pub(crate) fn build_init(req_id: i32, buf: &mut Buf) {
             pdu.push_constructed(snmp::MSG_GET, |req| {
                 req.push_integer(0); // error index
                 req.push_integer(0); // error status
-                req.push_integer(i64::from(1));
+                req.push_integer(req_id.into());
             });
             pdu.push_octet_string(&[]);
             pdu.push_octet_string(&[]);
