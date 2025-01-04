@@ -1,6 +1,6 @@
 use std::{
     io,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     num::Wrapping,
 };
 
@@ -8,7 +8,7 @@ use crate::{
     pdu::{self, Pdu},
     Error, MessageType, Oid, Result, Value, Version, BUFFER_SIZE,
 };
-use tokio::net::UdpSocket;
+use tokio::net::{lookup_host, ToSocketAddrs, UdpSocket};
 
 #[cfg(feature = "v3")]
 use crate::v3;
@@ -72,7 +72,7 @@ impl AsyncSession {
     where
         SA: ToSocketAddrs,
     {
-        let socket = match destination.to_socket_addrs()?.next() {
+        let socket = match lookup_host(destination).await?.next() {
             Some(SocketAddr::V4(addr)) => {
                 let s = UdpSocket::bind((Ipv4Addr::new(0, 0, 0, 0), 0)).await?;
                 s.connect(addr).await?;
