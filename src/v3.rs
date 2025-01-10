@@ -381,9 +381,6 @@ impl Security {
         if iv.len() != iv_len {
             return Err(Error::AuthFailure(AuthErrorKind::PrivLengthMismatch));
         }
-        if encrypted.len() % block_size > 0 {
-            return Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch));
-        }
         let key_len = cipher.key_len();
         if self.authoritative_state.priv_key.len() < key_len {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
