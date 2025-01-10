@@ -506,8 +506,14 @@ impl<'a> Pdu<'a> {
             bytes.len() - rdr.bytes_left() - auth_params.len() - security_rdr.bytes_left();
         let priv_params = security_rdr.read_asn_octetstring()?;
 
-        let mut need_retry = false;
-        let mut is_init = false;
+        // Discovery process requires two steps, each involving a separate request and response pair:
+        // - Authoritive engine ID acknowledgement
+        //   We expect a non-authenticated and not encrypted response with engine ID
+        // - Authoritive engine time synchronization
+        //   We expect an authenticated and not encrypted response with engine time and boots
+        // 
+        // See RFC3414 section 4 and section 3.2.7.a
+        let mut is_discovery = false;
 
         let mut prev_engine_time = security.engine_time();
 
@@ -515,9 +521,7 @@ impl<'a> Pdu<'a> {
             if security.authoritative_state.engine_id.is_empty() {
                 security.authoritative_state.engine_id = engine_id.to_vec();
                 security.update_key()?;
-                need_retry = true;
-                // allow non-encrypted on init
-                is_init = true;
+                is_discovery = true;
             } else {
                 return Err(Error::AuthFailure(AuthErrorKind::NotAuthenticated));
             }
@@ -526,7 +530,7 @@ impl<'a> Pdu<'a> {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineBootsNotProvided));
             }
             if security.authoritative_state.engine_boots < engine_boots {
-                need_retry = true;
+                is_discovery = true;
                 prev_engine_time = engine_time;
                 security
                     .authoritative_state
@@ -565,7 +569,7 @@ impl<'a> Pdu<'a> {
         }
 
         let scoped_pdu_seq = if flags & V3_MSG_FLAGS_PRIVACY == 0 {
-            if !security.authoritative_state.priv_key.is_empty() && !is_init {
+            if security.need_encrypt() && !is_discovery {
                 return Err(Error::AuthFailure(AuthErrorKind::ReplyNotEncrypted));
             }
             rdr.read_raw(asn1::TYPE_SEQUENCE)?
@@ -587,7 +591,7 @@ impl<'a> Pdu<'a> {
         let message_type = MessageType::from_ident(ident)?;
 
         if message_type == MessageType::Trap {
-            need_retry = false;
+            is_discovery = false;
         } else {
             if security.engine_boots() > engine_boots {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineBootsMismatch));
@@ -611,7 +615,7 @@ impl<'a> Pdu<'a> {
         let varbind_bytes = response_pdu.read_raw(asn1::TYPE_SEQUENCE)?;
         let varbinds = Varbinds::from_bytes(varbind_bytes);
 
-        if need_retry {
+        if is_discovery {
             return Err(Error::AuthUpdated);
         }
 
