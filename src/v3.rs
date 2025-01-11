@@ -508,7 +508,7 @@ impl<'a> Pdu<'a> {
         //   We expect a non-authenticated and not encrypted response with engine ID
         // - Authoritive engine time synchronization
         //   We expect an authenticated and not encrypted response with engine time and boots
-        // 
+        //
         // See RFC3414 section 4 and section 3.2.7.a
         let mut is_discovery = false;
 
