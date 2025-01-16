@@ -220,6 +220,10 @@ impl Security {
         Ok(buf)
     }
     pub(crate) fn update_key(&mut self) -> Result<()> {
+        if !self.need_auth() {
+            return Ok(());
+        }
+
         self.authoritative_state
             .update_auth_key(&self.authentication_password, self.auth_protocol)?;
         if let Auth::AuthPriv {
@@ -246,6 +250,9 @@ impl Security {
     /// corrects authoritative state engine time using local monotonic time
     pub(crate) fn correct_authoritative_engine_time(&mut self) {
         self.authoritative_state.correct_engine_time();
+    }
+    pub(crate) fn need_auth(&self) -> bool {
+        self.auth != Auth::NoAuthNoPriv
     }
     pub(crate) fn need_encrypt(&self) -> bool {
         !self.authoritative_state.priv_key.is_empty()
@@ -424,6 +431,7 @@ impl Security {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Auth {
+    NoAuthNoPriv,
     /// Authentication
     AuthNoPriv,
     /// Authentication and encryption
@@ -509,6 +517,8 @@ impl<'a> Pdu<'a> {
         // - Authoritive engine time synchronization
         //   We expect an authenticated and not encrypted response with engine time and boots
         //
+        // Only first step is done when using NoAuthNoPriv security level.
+        //
         // See RFC3414 section 4 and section 3.2.7.a
         let mut is_discovery = false;
 
@@ -519,7 +529,7 @@ impl<'a> Pdu<'a> {
                 security.authoritative_state.engine_id = engine_id.to_vec();
                 security.update_key()?;
                 is_discovery = true;
-            } else {
+            } else if security.need_auth() {
                 return Err(Error::AuthFailure(AuthErrorKind::NotAuthenticated));
             }
         } else {
@@ -558,10 +568,12 @@ impl<'a> Pdu<'a> {
                 std::ptr::write_bytes(auth_params_ptr, 0, auth_params.len());
             }
 
-            let hmac = security.calculate_hmac(bytes)?;
-
-            if hmac.len() < 12 || hmac[..12] != auth_params {
-                return Err(Error::AuthFailure(AuthErrorKind::SignatureMismatch));
+            if security.need_auth() {
+                let hmac = security.calculate_hmac(bytes)?;
+    
+                if hmac.len() < 12 || hmac[..12] != auth_params {
+                    return Err(Error::AuthFailure(AuthErrorKind::SignatureMismatch));
+                }
             }
         }
 
@@ -679,7 +691,11 @@ pub(crate) fn build(
     let mut sec_buf_len = 0;
     let mut priv_params: Vec<u8> = Vec::new();
     let mut inner_len = 0;
-    let mut flags = V3_MSG_FLAGS_REPORTABLE | V3_MSG_FLAGS_AUTH;
+    let mut flags = V3_MSG_FLAGS_REPORTABLE;
+
+    if security.need_auth() {
+        flags |= V3_MSG_FLAGS_AUTH;
+    }
     let encrypted = if security.need_encrypt() {
         flags |= V3_MSG_FLAGS_PRIVACY;
         let mut pdu_buf = Buf::default();
@@ -732,7 +748,9 @@ pub(crate) fn build(
     if (auth_pos + 12) > buf.len() {
         return Err(Error::ValueOutOfRange);
     }
-    let hmac = security.calculate_hmac(buf)?;
-    buf[auth_pos..auth_pos + 12].copy_from_slice(&hmac[..12]);
+    if security.need_auth() {
+        let hmac = security.calculate_hmac(buf)?;
+        buf[auth_pos..auth_pos + 12].copy_from_slice(&hmac[..12]);
+    }
     Ok(())
 }
