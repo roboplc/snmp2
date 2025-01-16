@@ -570,7 +570,7 @@ impl<'a> Pdu<'a> {
 
             if security.need_auth() {
                 let hmac = security.calculate_hmac(bytes)?;
-    
+
                 if hmac.len() < 12 || hmac[..12] != auth_params {
                     return Err(Error::AuthFailure(AuthErrorKind::SignatureMismatch));
                 }
