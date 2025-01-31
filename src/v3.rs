@@ -700,7 +700,7 @@ pub(crate) fn build(
         flags |= V3_MSG_FLAGS_PRIVACY;
         let mut pdu_buf = Buf::default();
         pdu_buf.push_sequence(|buf| {
-            pdu::build_inner(req_id, ident, values, non_repeaters, max_repetitions, buf);
+            pdu::build_inner(req_id, ident, values, max_repetitions, non_repeaters, buf);
             buf.push_octet_string(&[]);
             buf.push_octet_string(security.engine_id());
         });
@@ -715,7 +715,7 @@ pub(crate) fn build(
             buf.push_octet_string(encrypted);
         } else {
             buf.push_sequence(|buf| {
-                pdu::build_inner(req_id, ident, values, non_repeaters, max_repetitions, buf);
+                pdu::build_inner(req_id, ident, values, max_repetitions, non_repeaters, buf);
                 buf.push_octet_string(&[]);
                 buf.push_octet_string(security.engine_id());
             });
