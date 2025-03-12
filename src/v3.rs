@@ -565,7 +565,10 @@ impl<'a> Pdu<'a> {
             }
             unsafe {
                 let auth_params_ptr = bytes.as_ptr().add(auth_params_pos) as *mut u8;
-                std::ptr::write_bytes(auth_params_ptr, 0, auth_params.len());
+                // TODO: switch to safe code as the solution may be pretty fragile
+                std::hint::black_box(|| {
+                    std::ptr::write_bytes(auth_params_ptr, 0, auth_params.len());
+                })();
             }
 
             if security.need_auth() {
