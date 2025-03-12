@@ -322,7 +322,11 @@ impl Security {
     }
     /// encrypts the data
     pub(crate) fn encrypt(&self, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
-        let Auth::AuthPriv { cipher: cipher_kind, .. } = &self.auth else {
+        let Auth::AuthPriv {
+            cipher: cipher_kind,
+            ..
+        } = &self.auth
+        else {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotProvided));
         };
         if self.engine_id().is_empty() {
@@ -402,7 +406,11 @@ impl Security {
     }
     /// decrypts the data, the result is stored in `self.plain_buf`
     fn decrypt(&mut self, encrypted: &[u8], priv_params: &[u8]) -> Result<()> {
-        let Auth::AuthPriv { cipher: cipher_kind, .. } = &self.auth else {
+        let Auth::AuthPriv {
+            cipher: cipher_kind,
+            ..
+        } = &self.auth
+        else {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotProvided));
         };
         match cipher_kind {
@@ -564,11 +572,9 @@ impl<'a> Pdu<'a> {
                 return Err(Error::ValueOutOfRange);
             }
             unsafe {
-                let auth_params_ptr = bytes.as_ptr().add(auth_params_pos) as *mut u8;
-                // TODO: switch to safe code as the solution may be pretty fragile
-                std::hint::black_box(|| {
-                    std::ptr::write_bytes(auth_params_ptr, 0, auth_params.len());
-                })();
+                let cell = std::cell::UnsafeCell::new(bytes);
+                let auth_params_ptr = cell.get().add(auth_params_pos);
+                std::ptr::write_bytes(auth_params_ptr, 0, auth_params.len());
             }
 
             if security.need_auth() {
