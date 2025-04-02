@@ -88,10 +88,12 @@ impl AuthoritativeState {
         self.engine_time = engine_time;
         self.start_time = Instant::now();
     }
+
     fn update_authoritative_engine_time(&mut self, engine_time: i64) {
         self.engine_time = engine_time;
         self.start_time = Instant::now();
     }
+
     fn correct_engine_time(&mut self) {
         if self.engine_boots == 0 {
             self.engine_time_current = 0;
@@ -177,14 +179,17 @@ impl Security {
             plain_buf: Vec::new(),
         }
     }
+
     pub fn with_auth(mut self, auth: Auth) -> Self {
         self.auth = auth;
         self
     }
+
     pub fn with_auth_protocol(mut self, auth_protocol: AuthProtocol) -> Self {
         self.auth_protocol = auth_protocol;
         self
     }
+
     /// Note: the engine_id MUST be provided as a hex array, not as a byte-string.
     /// E.g. if a target has got an engine id `80003a8c04` set, it should be provided as `&[0x80,
     /// 0x00, 0x3a, 0x8c, 0x04]`
@@ -193,21 +198,25 @@ impl Security {
         self.update_key()?;
         Ok(self)
     }
+
     pub fn with_engine_boots_and_time(mut self, engine_boots: i64, engine_time: i64) -> Self {
         self.authoritative_state.engine_boots = engine_boots;
         self.authoritative_state
             .update_authoritative_engine_time(engine_time);
         self
     }
+
     pub fn reset_engine_id(&mut self) {
         self.authoritative_state.engine_id.clear();
         self.authoritative_state.auth_key.clear();
         self.authoritative_state.priv_key.clear();
     }
+
     pub fn reset_engine_counters(&mut self) {
         self.authoritative_state.engine_boots = 0;
         self.authoritative_state.update_authoritative_engine_time(0);
     }
+
     fn calculate_hmac(&self, data: &[u8]) -> Result<[u8; 20]> {
         if self.engine_id().is_empty() {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotReady));
@@ -219,6 +228,7 @@ impl Security {
         signer.sign(&mut buf)?;
         Ok(buf)
     }
+
     pub(crate) fn update_key(&mut self) -> Result<()> {
         if !self.need_auth() {
             return Ok(());
@@ -235,58 +245,75 @@ impl Security {
         }
         Ok(())
     }
+
     pub fn engine_id(&self) -> &[u8] {
         &self.authoritative_state.engine_id
     }
+
     pub fn engine_boots(&self) -> i64 {
         self.authoritative_state.engine_boots
     }
+
     pub fn engine_time(&self) -> i64 {
         self.authoritative_state.engine_time
     }
+
     pub fn username(&self) -> &[u8] {
         &self.username
     }
+
     /// corrects authoritative state engine time using local monotonic time
     pub(crate) fn correct_authoritative_engine_time(&mut self) {
         self.authoritative_state.correct_engine_time();
     }
+
     pub(crate) fn need_auth(&self) -> bool {
         self.auth != Auth::NoAuthNoPriv
     }
+
     pub(crate) fn need_encrypt(&self) -> bool {
         !self.authoritative_state.priv_key.is_empty()
     }
+
     pub(crate) fn need_init(&self) -> bool {
         self.engine_id().is_empty()
     }
+
     fn encrypt_des(&self, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let mut salt = [0; 8];
         salt[..4].copy_from_slice(&u32::try_from(self.engine_boots())?.to_be_bytes());
         openssl::rand::rand_bytes(&mut salt[4..])?;
+
         if data.is_empty() {
             return Ok((vec![], salt.to_vec()));
         }
+
         if self.authoritative_state.priv_key.len() < 16 {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
         }
+
         let des_key = &self.authoritative_state.priv_key[..8];
         let pre_iv = &self.authoritative_state.priv_key[8..16];
         let cipher = openssl::symm::Cipher::des_cbc();
+
         let mut iv = [0; 8];
         for (i, (a, b)) in pre_iv.iter().zip(salt.iter()).enumerate() {
             iv[i] = a ^ b;
         }
+
         let mut encrypted = vec![0; data.len() + cipher.block_size()];
         let mut crypter =
             openssl::symm::Crypter::new(cipher, openssl::symm::Mode::Encrypt, des_key, Some(&iv))?;
         let mut count = crypter.update(data, &mut encrypted)?;
+
         if count < encrypted.len() {
             count += crypter.finalize(&mut encrypted[count..])?;
         }
+
         encrypted.truncate(count);
         Ok((encrypted, salt.to_vec()))
     }
+
     fn encrypt_aes(
         &self,
         data: &[u8],
@@ -296,38 +323,48 @@ impl Security {
         let iv_len = cipher
             .iv_len()
             .ok_or_else(|| Error::Crypto("no IV len".to_owned()))?;
+
         let mut iv = Vec::with_capacity(iv_len);
         iv.extend_from_slice(&u32::try_from(self.engine_boots())?.to_be_bytes());
         iv.extend_from_slice(&u32::try_from(self.engine_time())?.to_be_bytes());
         let salt_pos = iv.len();
         iv.resize(iv_len, 0);
+
         openssl::rand::rand_bytes(&mut iv[salt_pos..])?;
         let key_len = cipher.key_len();
+
         if self.authoritative_state.priv_key.len() < key_len {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
         }
+
         let mut crypter = openssl::symm::Crypter::new(
             cipher,
             openssl::symm::Mode::Encrypt,
             &self.authoritative_state.priv_key[..key_len],
             Some(&iv),
         )?;
+
         let mut encrypted = vec![0; data.len() + block_size];
         let mut count = crypter.update(data, &mut encrypted)?;
+
         if count < encrypted.len() {
             count += crypter.finalize(&mut encrypted[count..])?;
         }
+
         encrypted.truncate(count);
         Ok((encrypted, iv[salt_pos..].to_vec()))
     }
+
     /// encrypts the data
     pub(crate) fn encrypt(&self, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let Auth::AuthPriv { cipher: cipher_kind, .. } = &self.auth else {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotProvided));
         };
+
         if self.engine_id().is_empty() {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotReady));
         }
+
         match cipher_kind {
             Cipher::Des => self.encrypt_des(data),
             Cipher::Aes128 => self.encrypt_aes(data, openssl::symm::Cipher::aes_128_cfb128(), 16),
@@ -335,6 +372,7 @@ impl Security {
             Cipher::Aes256 => self.encrypt_aes(data, openssl::symm::Cipher::aes_256_cfb128(), 32),
         }
     }
+
     fn decrypt_data_to_plain_buf(
         &mut self,
         mut crypter: openssl::symm::Crypter,
@@ -343,34 +381,44 @@ impl Security {
     ) -> Result<()> {
         self.plain_buf.resize(encrypted.len() + block_size, 0);
         let mut count = crypter.update(encrypted, &mut self.plain_buf)?;
+
         if count < self.plain_buf.len() {
             count += crypter.finalize(&mut self.plain_buf[count..])?;
         }
+
         self.plain_buf.truncate(count);
         Ok(())
     }
+
     fn decrypt_des(&mut self, encrypted: &[u8], priv_params: &[u8]) -> Result<()> {
         if priv_params.len() != 8 {
             return Err(Error::AuthFailure(AuthErrorKind::PrivLengthMismatch));
         }
+
         if self.authoritative_state.priv_key.len() < 16 {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
         }
+
         let cipher = openssl::symm::Cipher::des_cbc();
         let block_size = 8;
+
         if encrypted.len() % block_size > 0 {
             return Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch));
         }
+
         let des_key = &self.authoritative_state.priv_key[..8];
         let pre_iv = &self.authoritative_state.priv_key[8..16];
         let mut iv = [0; 8];
+
         for (i, (a, b)) in pre_iv.iter().zip(priv_params.iter()).enumerate() {
             iv[i] = a ^ b;
         }
+
         let crypter =
             openssl::symm::Crypter::new(cipher, openssl::symm::Mode::Decrypt, des_key, Some(&iv))?;
         self.decrypt_data_to_plain_buf(crypter, block_size, encrypted)
     }
+
     fn decrypt_aes(
         &mut self,
         encrypted: &[u8],
@@ -381,30 +429,37 @@ impl Security {
         let iv_len = cipher
             .iv_len()
             .ok_or_else(|| Error::Crypto("no IV len".to_owned()))?;
+
         let mut iv = Vec::with_capacity(iv_len);
         iv.extend_from_slice(&u32::try_from(self.engine_boots())?.to_be_bytes());
         iv.extend_from_slice(&u32::try_from(self.engine_time())?.to_be_bytes());
         iv.extend_from_slice(priv_params);
+
         if iv.len() != iv_len {
             return Err(Error::AuthFailure(AuthErrorKind::PrivLengthMismatch));
         }
+
         let key_len = cipher.key_len();
         if self.authoritative_state.priv_key.len() < key_len {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
         }
+
         let crypter = openssl::symm::Crypter::new(
             cipher,
             openssl::symm::Mode::Decrypt,
             &self.authoritative_state.priv_key[..key_len],
             Some(&iv),
         )?;
+
         self.decrypt_data_to_plain_buf(crypter, block_size, encrypted)
     }
+
     /// decrypts the data, the result is stored in `self.plain_buf`
     fn decrypt(&mut self, encrypted: &[u8], priv_params: &[u8]) -> Result<()> {
         let Auth::AuthPriv { cipher: cipher_kind, .. } = &self.auth else {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotProvided));
         };
+
         match cipher_kind {
             Cipher::Des => self.decrypt_des(encrypted, priv_params),
             Cipher::Aes128 => self.decrypt_aes(
@@ -486,18 +541,22 @@ impl<'a> Pdu<'a> {
         let mut global_data_rdr = AsnReader::from_bytes(global_data_seq);
         let msg_id = global_data_rdr.read_asn_integer()?;
         let max_size = global_data_rdr.read_asn_integer()?;
+
         if max_size > BUFFER_SIZE as i64 {
             return Err(Error::BufferOverflow);
         }
+
         let flags = global_data_rdr
             .read_asn_octetstring()?
             .first()
             .copied()
             .unwrap_or_default();
+
         let security_model = global_data_rdr.read_asn_integer()?;
         if security_model != 3 {
             return Err(Error::AuthFailure(AuthErrorKind::UnsupportedUSM));
         }
+
         let security_params = rdr.read_asn_octetstring()?;
         let security_seq = AsnReader::from_bytes(security_params).read_raw(asn1::TYPE_SEQUENCE)?;
         let mut security_rdr = AsnReader::from_bytes(security_seq);
@@ -536,6 +595,7 @@ impl<'a> Pdu<'a> {
             if security.authoritative_state.engine_boots == 0 && engine_boots == 0 {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineBootsNotProvided));
             }
+
             if security.authoritative_state.engine_boots < engine_boots {
                 is_discovery = true;
                 prev_engine_time = engine_time;
@@ -547,6 +607,7 @@ impl<'a> Pdu<'a> {
                     .authoritative_state
                     .update_authoritative_engine_time(engine_time);
             }
+
             if username != security.username {
                 return Err(Error::AuthFailure(AuthErrorKind::UsernameMismatch));
             }
@@ -554,15 +615,18 @@ impl<'a> Pdu<'a> {
             if engine_id.is_empty() {
                 return Err(Error::AuthFailure(AuthErrorKind::NotAuthenticated));
             }
+
             if security.authoritative_state.engine_id.is_empty() {
                 security.authoritative_state.engine_id = engine_id.to_vec();
                 security.update_key()?;
             } else if engine_id != security.authoritative_state.engine_id {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineIdMismatch));
             }
+
             if auth_params.len() != 12 || auth_params_pos + auth_params.len() > bytes.len() {
                 return Err(Error::ValueOutOfRange);
             }
+
             unsafe {
                 let auth_params_ptr = bytes.as_ptr().add(auth_params_pos) as *mut u8;
                 // TODO: switch to safe code as the solution may be pretty fragile
@@ -584,6 +648,7 @@ impl<'a> Pdu<'a> {
             if security.need_encrypt() && !is_discovery {
                 return Err(Error::AuthFailure(AuthErrorKind::ReplyNotEncrypted));
             }
+
             rdr.read_raw(asn1::TYPE_SEQUENCE)?
         } else {
             let encrypted_pdu = rdr.read_asn_octetstring()?;
@@ -699,6 +764,7 @@ pub(crate) fn build(
     if security.need_auth() {
         flags |= V3_MSG_FLAGS_AUTH;
     }
+
     let encrypted = if security.need_encrypt() {
         flags |= V3_MSG_FLAGS_PRIVACY;
         let mut pdu_buf = Buf::default();
@@ -713,6 +779,7 @@ pub(crate) fn build(
     } else {
         None
     };
+
     buf.push_sequence(|buf| {
         if let Some(ref encrypted) = encrypted {
             buf.push_octet_string(encrypted);
@@ -747,13 +814,16 @@ pub(crate) fn build(
         auth_pos = buf.len() - l0 - (sec_buf_len - auth_pos);
         inner_len = buf.len();
     });
+
     auth_pos += buf.len() - inner_len;
     if (auth_pos + 12) > buf.len() {
         return Err(Error::ValueOutOfRange);
     }
+
     if security.need_auth() {
         let hmac = security.calculate_hmac(buf)?;
         buf[auth_pos..auth_pos + 12].copy_from_slice(&hmac[..12]);
     }
+
     Ok(())
 }
