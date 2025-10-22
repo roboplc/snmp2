@@ -390,6 +390,31 @@ pub(crate) fn build_get(
     )
 }
 
+pub(crate) fn build_get_many(
+    version: Version,
+    community: &[u8],
+    req_id: i32,
+    oids: &[&Oid],
+    buf: &mut Buf,
+    #[cfg(feature = "v3")] security: Option<&v3::Security>,
+) -> Result<()> {
+    build(
+        version,
+        community,
+        snmp::MSG_GET,
+        req_id,
+        oids.iter()
+            .map(|&oid| (oid, Value::Null))
+            .collect::<Vec<_>>()
+            .as_slice(),
+        0,
+        0,
+        buf,
+        #[cfg(feature = "v3")]
+        security,
+    )
+}
+
 pub(crate) fn build_getnext(
     version: Version,
     community: &[u8],

@@ -202,6 +202,28 @@ impl SyncSession {
         Ok(resp)
     }
 
+    pub fn get_many(&mut self, oids: &[&Oid<'_>]) -> Result<Pdu> {
+        self.prepare();
+        let req_id = self.req_id.0;
+        pdu::build_get_many(
+            self.version,
+            self.community.as_slice(),
+            req_id,
+            oids,
+            &mut self.send_pdu,
+            #[cfg(feature = "v3")]
+            self.security.as_ref(),
+        )?;
+        let resp = Pdu::from_bytes_inner(
+            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
+            #[cfg(feature = "v3")]
+            self.security.as_mut(),
+        )?;
+        self.req_id += Wrapping(1);
+        resp.validate(MessageType::Response, req_id, &self.community)?;
+        Ok(resp)
+    }
+
     pub fn getnext(&mut self, oid: &Oid) -> Result<Pdu> {
         self.prepare();
         let req_id = self.req_id.0;
