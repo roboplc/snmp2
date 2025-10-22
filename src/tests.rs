@@ -4,6 +4,45 @@ use super::{pdu, snmp, Oid};
 use super::{AsnReader, Error, Version};
 
 #[test]
+fn build_get_many_pdu() {
+    let mut pdu = pdu::Buf::default();
+    pdu::build_get_many(
+        Version::V2C,
+        b"tyS0n43d",
+        1_251_699_619,
+        &[
+            &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+            &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 2, 0]).unwrap(),
+        ],
+        &mut pdu,
+        #[cfg(feature = "v3")]
+        None,
+    )
+    .unwrap();
+
+    let expected = &[
+        48, 57, // SEQUENCE (Message), length 51
+        2, 1, 1, // INTEGER (Version = 1 for SNMPv2c)
+        4, 8, 116, 121, 83, 48, 110, 52, 51, 100, // OCTET STRING (Community = "tyS0n43d")
+        160, 42, // GetRequest PDU (Tag = 0xA0), length 28
+        2, 4, 74, 155, 107, 163, // INTEGER (Request ID = 1_251_699_619)
+        2, 1, 0, // INTEGER (Error Status = 0)
+        2, 1, 0, // INTEGER (Error Index = 0)
+        48, 28, // SEQUENCE (VarBindList), length 22
+        // First VarBind
+        48, 12, // SEQUENCE, length 12
+        6, 8, 43, 6, 1, 2, 1, 1, 1, 0, // OBJECT IDENTIFIER (1.3.6.1.2.1.1.1.0)
+        5, 0, // NULL
+        // Second VarBind
+        48, 12, // SEQUENCE, length 12
+        6, 8, 43, 6, 1, 2, 1, 1, 2, 0, // OBJECT IDENTIFIER (1.3.6.1.2.1.1.2.0)
+        5, 0, // NULL
+    ];
+
+    assert_eq!(&pdu[..], &expected[..]);
+}
+
+#[test]
 fn build_getnext_pdu() {
     let mut pdu = pdu::Buf::default();
     pdu::build_getnext(
