@@ -12,6 +12,7 @@ pub mod snmp;
 mod syncsession;
 #[cfg(feature = "v3")]
 pub mod v3;
+use asn1_rs::Err;
 pub use syncsession::SyncSession;
 #[cfg(feature = "tokio")]
 mod asyncsession;
@@ -225,6 +226,14 @@ impl fmt::Debug for Value<'_> {
     }
 }
 
+fn zero_len(val: &[u8]) -> Result<&[u8]> {
+    if val.len() == 0 {
+        Ok(val)
+    } else {
+        Err(Error::AsnInvalidLen)
+    }
+}
+
 impl<'a> Iterator for AsnReader<'a> {
     type Item = Value<'a>;
 
@@ -274,6 +283,18 @@ impl<'a> Iterator for AsnReader<'a> {
                 snmp::MSG_REPORT => self
                     .read_raw(ident)
                     .map(|v| Value::Report(AsnReader::from_bytes(v))),
+                snmp::SNMP_ENDOFMIBVIEW => self
+                    .read_raw(ident)
+                    .and_then(zero_len)
+                    .map(|_v| Value::EndOfMibView),
+                snmp::SNMP_NOSUCHOBJECT => self
+                    .read_raw(ident)
+                    .and_then(zero_len)
+                    .map(|_v| Value::NoSuchObject),
+                snmp::SNMP_NOSUCHINSTANCE => self
+                    .read_raw(ident)
+                    .and_then(zero_len)
+                    .map(|_v| Value::NoSuchInstance),
                 ident if ident & asn1::CONSTRUCTED == asn1::CONSTRUCTED => self
                     .read_raw(ident)
                     .map(|v| Value::Constructed(ident, AsnReader::from_bytes(v))),
