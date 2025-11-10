@@ -1,7 +1,47 @@
 use crate::{MessageType, Pdu, Value};
 
 use super::{pdu, snmp, Oid};
-use super::{AsnReader, Error, Version};
+use super::{AsnReader, Error, Varbinds, Version};
+use asn1_rs::oid;
+
+#[test]
+fn build_get_many_pdu() {
+    let mut pdu = pdu::Buf::default();
+    pdu::build_get_many(
+        Version::V2C,
+        b"tyS0n43d",
+        1_251_699_619,
+        &[
+            &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+            &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 2, 0]).unwrap(),
+        ],
+        &mut pdu,
+        #[cfg(feature = "v3")]
+        None,
+    )
+    .unwrap();
+
+    let expected = &[
+        48, 57, // SEQUENCE (Message), length 51
+        2, 1, 1, // INTEGER (Version = 1 for SNMPv2c)
+        4, 8, 116, 121, 83, 48, 110, 52, 51, 100, // OCTET STRING (Community = "tyS0n43d")
+        160, 42, // GetRequest PDU (Tag = 0xA0), length 28
+        2, 4, 74, 155, 107, 163, // INTEGER (Request ID = 1_251_699_619)
+        2, 1, 0, // INTEGER (Error Status = 0)
+        2, 1, 0, // INTEGER (Error Index = 0)
+        48, 28, // SEQUENCE (VarBindList), length 22
+        // First VarBind
+        48, 12, // SEQUENCE, length 12
+        6, 8, 43, 6, 1, 2, 1, 1, 1, 0, // OBJECT IDENTIFIER (1.3.6.1.2.1.1.1.0)
+        5, 0, // NULL
+        // Second VarBind
+        48, 12, // SEQUENCE, length 12
+        6, 8, 43, 6, 1, 2, 1, 1, 2, 0, // OBJECT IDENTIFIER (1.3.6.1.2.1.1.2.0)
+        5, 0, // NULL
+    ];
+
+    assert_eq!(&pdu[..], &expected[..]);
+}
 
 #[test]
 fn build_getnext_pdu() {
@@ -145,4 +185,71 @@ fn test_mib() {
     assert_eq!(name, "IBM-CPS-MIB::cpsSystemSendTrap");
     let snmp_oid2 = Oid::from_mib_name(&name).unwrap();
     assert_eq!(snmp_oid, snmp_oid2);
+}
+
+#[test]
+fn test_varbinds_no_such_object_no_such_instance_end_of_mib_view() {
+    const EXPECTED_LEN: usize = 5;
+    let raw: &[u8] = &[
+        // VarBind 1
+        0x30, 0x14, // SEQUENCE, length 20
+        0x06, 0x0b, // OBJECT IDENTIFIER, length 11
+        0x2b, 0x06, 0x01, 0x02, 0x01, 0x1f, 0x01, 0x01, 0x01, 0x06,
+        0x02, // OID: 1.3.6.1.2.1.31.1.1.1.6.2
+        0x46, 0x05, // Counter64, length 5
+        0x01, 0x79, 0x66, 0xac, 0x06, // Value 6331739142
+        // VarBind 2
+        0x30, 0x0b, // SEQUENCE, length 11
+        0x06, 0x07, // OBJECT IDENTIFIER, length 7
+        0x2b, 0x06, 0x01, 0x02, 0x01, 0x87, 0x67, // OID: 1.3.6.1.2.1.999
+        0x80, 0x00, // Context-specific tag (noSuchObject)
+        // VarBind 3
+        0x30, 0x0b, // SEQUENCE, length 11
+        0x06, 0x07, // OBJECT IDENTIFIER, length 7
+        0x2b, 0x06, 0x01, 0x02, 0x01, 0x87, 0x66, // OID: 1.3.6.1.2.1.998
+        0x81, 0x00, // Context-specific tag (noSuchInstance)
+        // VarBind 4
+        0x30, 0x0b, // SEQUENCE, length 11
+        0x06, 0x07, // OBJECT IDENTIFIER, length 7
+        0x2b, 0x06, 0x01, 0x02, 0x01, 0x87, 0x65, // OID: 1.3.6.1.2.1.997
+        0x82, 0x00, // Context-specific tag (endOfMibView)
+        // VarBind 5
+        0x30, 0x0f, // SEQUENCE, length 15
+        0x06, 0x0a, // OBJECT IDENTIFIER, length 10
+        0x2b, 0x06, 0x01, 0x02, 0x01, 0x02, 0x02, 0x01, 0x14,
+        0x02, // OID: 1.3.6.1.2.1.2.2.1.20.2
+        0x41, 0x01, 0x03, // (Counter32), value: 3
+    ];
+    let mut varbinds = Varbinds::from_bytes(raw);
+
+    let count = varbinds.clone().count();
+    assert_eq!(count, EXPECTED_LEN);
+
+    let vec_varbinds: Vec<_> = varbinds.clone().collect();
+    assert_eq!(vec_varbinds.len(), EXPECTED_LEN);
+
+    let pair = varbinds.next();
+    let (oid, val) = pair.unwrap();
+    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .31 .1 .1 .1 .6 .2));
+    assert!(matches!(val, Value::Counter64(6331739142)));
+
+    let pair = varbinds.next();
+    let (oid, val) = pair.unwrap();
+    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .999));
+    assert!(matches!(val, Value::NoSuchObject));
+
+    let pair = varbinds.next();
+    let (oid, val) = pair.unwrap();
+    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .998));
+    assert!(matches!(val, Value::NoSuchInstance));
+
+    let pair = varbinds.next();
+    let (oid, val) = pair.unwrap();
+    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .997));
+    assert!(matches!(val, Value::EndOfMibView));
+
+    let pair = varbinds.next();
+    let (oid, val) = pair.unwrap();
+    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .2 .2 .1 .20 .2));
+    assert!(matches!(val, Value::Counter32(3)));
 }

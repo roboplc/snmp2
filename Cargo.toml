@@ -18,11 +18,11 @@ features = ["v3", "tokio", "openssl/vendored"]
 [dependencies]
 asn1-rs = "0.6"
 snmptools = { version = "^0.1.2", optional = true }
-tokio = { version = "1.36", features = ["net"], optional = true }
+tokio = { version = "1.47", features = ["net"], optional = true }
 openssl = { version = "0.10", optional = true }
 
 [dev-dependencies]
-tokio = { version = "=1.36" }
+tokio = { version = "=1.47" }
 
 [features]
 mibs = ["dep:snmptools"]
