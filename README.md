@@ -230,7 +230,7 @@ as FIPS mode is activated in `openssl`. Refer to the
 
 ## MSRV
 
-1.68.0
+1.83.0
 
 ## Copyright
 

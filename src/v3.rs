@@ -357,7 +357,11 @@ impl Security {
 
     /// encrypts the data
     pub(crate) fn encrypt(&self, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
-        let Auth::AuthPriv { cipher: cipher_kind, .. } = &self.auth else {
+        let Auth::AuthPriv {
+            cipher: cipher_kind,
+            ..
+        } = &self.auth
+        else {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotProvided));
         };
 
@@ -456,7 +460,11 @@ impl Security {
 
     /// decrypts the data, the result is stored in `self.plain_buf`
     fn decrypt(&mut self, encrypted: &[u8], priv_params: &[u8]) -> Result<()> {
-        let Auth::AuthPriv { cipher: cipher_kind, .. } = &self.auth else {
+        let Auth::AuthPriv {
+            cipher: cipher_kind,
+            ..
+        } = &self.auth
+        else {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotProvided));
         };
 

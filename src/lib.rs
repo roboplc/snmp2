@@ -12,7 +12,6 @@ pub mod snmp;
 mod syncsession;
 #[cfg(feature = "v3")]
 pub mod v3;
-use asn1_rs::Err;
 pub use syncsession::SyncSession;
 #[cfg(feature = "tokio")]
 mod asyncsession;
