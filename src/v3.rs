@@ -644,7 +644,9 @@ impl<'a> Pdu<'a> {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineIdMismatch));
             }
 
-            if auth_params.len() != truncation_len || auth_params_pos + auth_params.len() > bytes.len() {
+            if auth_params.len() != truncation_len
+                || auth_params_pos + auth_params.len() > bytes.len()
+            {
                 return Err(Error::ValueOutOfRange);
             }
 
