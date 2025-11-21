@@ -217,14 +217,15 @@ impl Security {
         self.authoritative_state.update_authoritative_engine_time(0);
     }
 
-    fn calculate_hmac(&self, data: &[u8]) -> Result<[u8; 20]> {
+    fn calculate_hmac(&self, data: &[u8]) -> Result<Vec<u8>> {
         if self.engine_id().is_empty() {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotReady));
         }
         let pkey = PKey::hmac(&self.authoritative_state.auth_key)?;
         let mut signer = Signer::new(self.auth_protocol.digest(), &pkey)?;
-        let mut buf = [0; 20];
         signer.update(data)?;
+        let required_length = signer.len()?;
+        let mut buf = vec![0; required_length];
         signer.sign(&mut buf)?;
         Ok(buf)
     }
@@ -528,6 +529,17 @@ impl AuthProtocol {
             AuthProtocol::Sha512 => MessageDigest::sha512(),
         }
     }
+
+    fn truncation_length(self) -> usize {
+        match self {
+            AuthProtocol::Md5 => 12,
+            AuthProtocol::Sha1 => 12,
+            AuthProtocol::Sha224 => 16,
+            AuthProtocol::Sha256 => 24,
+            AuthProtocol::Sha384 => 32,
+            AuthProtocol::Sha512 => 48,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -545,6 +557,7 @@ impl<'a> Pdu<'a> {
         mut rdr: AsnReader<'a>,
         security: &'a mut Security,
     ) -> Result<Pdu<'a>> {
+        let truncation_len = security.auth_protocol.truncation_length();
         let global_data_seq = rdr.read_raw(asn1::TYPE_SEQUENCE)?;
         let mut global_data_rdr = AsnReader::from_bytes(global_data_seq);
         let msg_id = global_data_rdr.read_asn_integer()?;
@@ -631,7 +644,7 @@ impl<'a> Pdu<'a> {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineIdMismatch));
             }
 
-            if auth_params.len() != 12 || auth_params_pos + auth_params.len() > bytes.len() {
+            if auth_params.len() != truncation_len || auth_params_pos + auth_params.len() > bytes.len() {
                 return Err(Error::ValueOutOfRange);
             }
 
@@ -646,7 +659,7 @@ impl<'a> Pdu<'a> {
             if security.need_auth() {
                 let hmac = security.calculate_hmac(bytes)?;
 
-                if hmac.len() < 12 || hmac[..12] != auth_params {
+                if hmac.len() < truncation_len || hmac[..truncation_len] != auth_params {
                     return Err(Error::AuthFailure(AuthErrorKind::SignatureMismatch));
                 }
             }
@@ -760,6 +773,7 @@ pub(crate) fn build(
     security: Option<&Security>,
 ) -> Result<()> {
     let security = security.ok_or(Error::AuthFailure(AuthErrorKind::SecurityNotProvided))?;
+    let truncation_len = security.auth_protocol.truncation_length();
     buf.reset();
     let mut sec_buf_seq = Buf::default();
     sec_buf_seq.reset();
@@ -802,7 +816,7 @@ pub(crate) fn build(
         sec_buf_seq.push_sequence(|buf| {
             buf.push_octet_string(&priv_params); // priv params
             let l0 = buf.len() - priv_params.len();
-            buf.push_octet_string(&[0u8; 12]); // auth params
+            buf.push_octet_string(&vec![0u8; truncation_len]); // auth params
             let l1 = buf.len() - l0;
             buf.push_octet_string(security.username()); // user name
             buf.push_integer(security.engine_time()); // time
@@ -824,13 +838,13 @@ pub(crate) fn build(
     });
 
     auth_pos += buf.len() - inner_len;
-    if (auth_pos + 12) > buf.len() {
+    if (auth_pos + truncation_len) > buf.len() {
         return Err(Error::ValueOutOfRange);
     }
 
     if security.need_auth() {
         let hmac = security.calculate_hmac(buf)?;
-        buf[auth_pos..auth_pos + 12].copy_from_slice(&hmac[..12]);
+        buf[auth_pos..auth_pos + truncation_len].copy_from_slice(&hmac[..truncation_len]);
     }
 
     Ok(())
