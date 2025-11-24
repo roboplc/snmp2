@@ -160,7 +160,7 @@ impl AuthoritativeState {
             return Err(Error::AuthFailure(AuthErrorKind::NotAuthenticated));
         }
         self.priv_key = self.generate_key(privacy_password, auth_protocol)?;
-        if !Self::priv_key_needs_extension(&auth_protocol, cipher) {
+        if !cipher.priv_key_needs_extension(&auth_protocol) {
             return Ok(());
         }
         match extension_method.as_ref() {
@@ -173,27 +173,6 @@ impl AuthoritativeState {
             None => return Err(Error::AuthFailure(AuthErrorKind::KeyExtensionRequired)),
         }
         Ok(())
-    }
-
-    // The are 5 Auth-Priv pairs, where Auth hasher generates too short input for Priv:
-    // Auth Kul length vs required Priv key length
-    // Auth Algorithm   Kul Len   DES (16)   AES-128 (16)   AES-192 (24)   AES-256 (32)
-    // -------------------------------------------------------------------------------
-    // MD5              16        Enough     Enough         EXTEND         EXTEND
-    // SHA-1            20        Enough     Enough         EXTEND         EXTEND
-    // SHA-224          28        Enough     Enough         Enough         EXTEND
-    // SHA-256          32        Enough     Enough         Enough         Enough
-    // SHA-384          48        Enough     Enough         Enough         Enough
-    // SHA-512          64        Enough     Enough         Enough         Enough
-    fn priv_key_needs_extension(auth_protocol: &AuthProtocol, cipher: &Cipher) -> bool {
-        match (auth_protocol, cipher) {
-            (AuthProtocol::Md5, Cipher::Aes192)
-            | (AuthProtocol::Md5, Cipher::Aes256)
-            | (AuthProtocol::Sha1, Cipher::Aes192)
-            | (AuthProtocol::Sha1, Cipher::Aes256)
-            | (AuthProtocol::Sha224, Cipher::Aes256) => true,
-            _ => false,
-        }
     }
 
     /// Extend `priv_key` to the required length using the Blumenthal algorithm.
@@ -254,6 +233,15 @@ pub enum KeyExtension {
     Reeder,
 }
 
+impl KeyExtension {
+    pub fn other(&self) -> Self {
+        match self {
+            KeyExtension::Blumenthal => KeyExtension::Reeder,
+            KeyExtension::Reeder => KeyExtension::Blumenthal,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Security {
     pub(crate) username: Vec<u8>,
@@ -291,6 +279,18 @@ impl Security {
     pub fn with_key_extension_method(mut self, key_extension_method: KeyExtension) -> Self {
         self.key_extension_method = Some(key_extension_method);
         self
+    }
+
+    pub(crate) fn another_key_extension_method(&mut self) -> Option<KeyExtension> {
+        if let Auth::AuthPriv { ref cipher, .. } = self.auth {
+            if cipher.priv_key_needs_extension(&self.auth_protocol) {
+                if let Some(used_method) = self.key_extension_method {
+                    self.key_extension_method = Some(used_method.other());
+                    return self.key_extension_method;
+                }
+            }
+        }
+        None
     }
 
     /// Note: the engine_id MUST be provided as a hex array, not as a byte-string.
@@ -662,6 +662,29 @@ impl Cipher {
             Cipher::Aes128 => 16,
             Cipher::Aes192 => 24,
             Cipher::Aes256 => 32,
+        }
+    }
+
+    /// Tells if for given auth_protocol and cipher pair, the priv_key is too short and need to be extended.
+    ///
+    /// The are 5 Auth-Priv pairs, where Auth hasher generates too short input for Priv:
+    /// Auth Kul length vs required Priv key length table:
+    /// Auth Algorithm   Kul Len   DES (16)   AES-128 (16)   AES-192 (24)   AES-256 (32)
+    /// -------------------------------------------------------------------------------
+    /// MD5              16        Enough     Enough         EXTEND         EXTEND
+    /// SHA-1            20        Enough     Enough         EXTEND         EXTEND
+    /// SHA-224          28        Enough     Enough         Enough         EXTEND
+    /// SHA-256          32        Enough     Enough         Enough         Enough
+    /// SHA-384          48        Enough     Enough         Enough         Enough
+    /// SHA-512          64        Enough     Enough         Enough         Enough
+    pub fn priv_key_needs_extension(&self, auth_protocol: &AuthProtocol) -> bool {
+        match (auth_protocol, self) {
+            (AuthProtocol::Md5, Cipher::Aes192)
+            | (AuthProtocol::Md5, Cipher::Aes256)
+            | (AuthProtocol::Sha1, Cipher::Aes192)
+            | (AuthProtocol::Sha1, Cipher::Aes256)
+            | (AuthProtocol::Sha224, Cipher::Aes256) => true,
+            _ => false,
         }
     }
 }

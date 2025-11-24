@@ -169,6 +169,27 @@ impl SyncSession {
         Ok(())
     }
 
+    /// Checks if KeyExtension affects this session privacy and then re-inits session with different KeyExtension
+    ///
+    /// # Returns
+    /// 'Ok(Some(new_key_extension))' When new_key_extension method was set
+    /// 'Ok(None)' When security disabled
+    /// or Auth type is not AuthPriv
+    /// or when Auth-Priv pair is not the one that needs key extension
+    /// or when KeyExtension was not set for the session.
+    /// 'Err(error)' when 'init()' failed with error returned from 'init()'
+    #[cfg(feature = "v3")]
+    pub fn try_another_key_extension_method(&mut self) -> Result<Option<v3::KeyExtension>> {
+        if let Some(ref mut security) = self.security {
+            if let Some(new_method) = security.another_key_extension_method() {
+                security.authoritative_state = v3::AuthoritativeState::default();
+                self.init()?;
+                return Ok(Some(new_method));
+            }
+        }
+        Ok(None)
+    }
+
     #[cfg(not(feature = "v3"))]
     #[allow(clippy::unused_self)]
     fn prepare(&mut self) {}
