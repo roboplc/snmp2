@@ -960,7 +960,7 @@ pub(crate) fn build(
             buf.push_octet_string(&[]);
             buf.push_octet_string(security.engine_id());
         });
-        let (encrypted, salt) = security.encrypt(&pdu_buf).unwrap();
+        let (encrypted, salt) = security.encrypt(&pdu_buf)?;
         priv_params.extend_from_slice(&salt);
         Some(encrypted)
     } else {
