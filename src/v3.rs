@@ -602,14 +602,38 @@ impl<'a> Pdu<'a> {
         let mut prev_engine_time = security.engine_time();
 
         if flags & V3_MSG_FLAGS_AUTH == 0 {
+            // Unauthenticated REPORT (discovery step)
+            // Update engine_id if unknown
             if security.authoritative_state.engine_id.is_empty() {
                 security.authoritative_state.engine_id = engine_id.to_vec();
                 security.update_key()?;
                 is_discovery = true;
-            } else if security.need_auth() {
+            } else if engine_id != security.authoritative_state.engine_id && !engine_id.is_empty() {
+                // If agent reports a different engineID, that’s a mismatch
+                return Err(Error::AuthFailure(AuthErrorKind::EngineIdMismatch));
+            }
+
+            // Many agents include boots/time in the first REPORT.
+            // If provided (non-zero), update authoritative state here.
+            if security.authoritative_state.engine_boots < engine_boots {
+                is_discovery = true;
+                prev_engine_time = engine_time;
+                security
+                    .authoritative_state
+                    .update_authoritative(engine_boots, engine_time);
+            }
+
+            // When in discovery and we updated state, tell caller to retry
+            if is_discovery {
+                return Err(Error::AuthUpdated);
+            }
+
+            // If we still need auth but haven’t updated state, it’s an auth failure
+            if security.need_auth() {
                 return Err(Error::AuthFailure(AuthErrorKind::NotAuthenticated));
             }
         } else {
+            // Authenticated path
             if security.authoritative_state.engine_boots == 0 && engine_boots == 0 {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineBootsNotProvided));
             }
