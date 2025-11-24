@@ -224,10 +224,7 @@ impl Security {
         let pkey = PKey::hmac(&self.authoritative_state.auth_key)?;
         let mut signer = Signer::new(self.auth_protocol.digest(), &pkey)?;
         signer.update(data)?;
-        let required_length = signer.len()?;
-        let mut buf = vec![0; required_length];
-        signer.sign(&mut buf)?;
-        Ok(buf)
+        signer.sign_to_vec().map_err(Error::from)
     }
 
     pub(crate) fn update_key(&mut self) -> Result<()> {
