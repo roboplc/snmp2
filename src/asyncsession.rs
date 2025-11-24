@@ -20,7 +20,10 @@ pub struct AsyncSession {
     community: Vec<u8>,
     req_id: Wrapping<i32>,
     send_pdu: pdu::Buf,
+    #[cfg(not(feature = "heap_buffers"))]
     recv_buf: [u8; BUFFER_SIZE],
+    #[cfg(feature = "heap_buffers")]
+    recv_buf: Box<[u8]>,
     #[cfg(feature = "v3")]
     security: Option<v3::Security>,
 }
@@ -96,7 +99,10 @@ impl AsyncSession {
             community: community.to_vec(),
             req_id: Wrapping(starting_req_id),
             send_pdu: pdu::Buf::default(),
+            #[cfg(not(feature = "heap_buffers"))]
             recv_buf: [0; BUFFER_SIZE],
+            #[cfg(feature = "heap_buffers")]
+            recv_buf: vec![0u8; BUFFER_SIZE].into_boxed_slice(),
             #[cfg(feature = "v3")]
             security: None,
         })
