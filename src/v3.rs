@@ -33,6 +33,7 @@ pub enum AuthErrorKind {
     ReplyNotEncrypted,
     SecurityNotProvided,
     SecurityNotReady,
+    KeyExtensionRequired,
 }
 
 impl fmt::Display for AuthErrorKind {
@@ -53,6 +54,9 @@ impl fmt::Display for AuthErrorKind {
             AuthErrorKind::ReplyNotEncrypted => write!(f, "Not an encrypted reply"),
             AuthErrorKind::SecurityNotProvided => write!(f, "Security parameters not provided"),
             AuthErrorKind::SecurityNotReady => write!(f, "Security parameters not ready"),
+            AuthErrorKind::KeyExtensionRequired => {
+                write!(f, "Auth/Priv pair needs a key extension method")
+            }
         }
     }
 }
@@ -148,13 +152,93 @@ impl AuthoritativeState {
         &mut self,
         privacy_password: &[u8],
         auth_protocol: AuthProtocol,
+        cipher: &Cipher,
+        extension_method: &Option<KeyExtension>,
     ) -> Result<()> {
         if self.engine_id.is_empty() {
             self.priv_key.clear();
             return Err(Error::AuthFailure(AuthErrorKind::NotAuthenticated));
         }
         self.priv_key = self.generate_key(privacy_password, auth_protocol)?;
+        if !cipher.priv_key_needs_extension(&auth_protocol) {
+            return Ok(());
+        }
+        match extension_method.as_ref() {
+            Some(KeyExtension::Blumenthal) => {
+                self.extend_priv_key_with_blumenthal_method(cipher.priv_key_len(), auth_protocol)?
+            }
+            Some(KeyExtension::Reeder) => {
+                self.extend_priv_key_with_reeder_method(cipher.priv_key_len(), auth_protocol)?
+            }
+            None => return Err(Error::AuthFailure(AuthErrorKind::KeyExtensionRequired)),
+        }
         Ok(())
+    }
+
+    /// Extend `priv_key` to the required length using the Blumenthal algorithm.
+    /// This is used for AES-192/256 privacy keys when Kul is shorter than needed.
+    fn extend_priv_key_with_blumenthal_method(
+        &mut self,
+        need_key_len: usize,
+        auth_protocol: AuthProtocol,
+    ) -> Result<()> {
+        if need_key_len <= self.priv_key.len() {
+            return Ok(());
+        }
+
+        let mut remaining = need_key_len - self.priv_key.len();
+
+        while remaining > 0 {
+            // Hash the current priv_key using the auth protocol’s hash function
+            let mut hasher = auth_protocol.create_hasher()?;
+            hasher.update(&self.priv_key)?;
+            let new_hash = hasher.finish()?; // full digest
+
+            // Append as much as needed
+            let copy_len = remaining.min(new_hash.len());
+            self.priv_key.extend_from_slice(&new_hash[..copy_len]);
+            remaining -= copy_len;
+        }
+
+        Ok(())
+    }
+    /// Extend Kul to the required length using the Reeder method.
+    /// `need_key_len` is the desired privacy key length (e.g. 24 for AES-192, 32 for AES-256).
+    fn extend_priv_key_with_reeder_method(
+        &mut self,
+        need_key_len: usize,
+        auth_protocol: AuthProtocol,
+    ) -> Result<()> {
+        if need_key_len < self.priv_key.len() {
+            return Ok(());
+        }
+        let mut remaining = need_key_len - self.priv_key.len();
+        while remaining > 0 {
+            // Step 1: Ku' = Ku(origKul)
+            // Here we treat the current Kul as the "password"
+            let new_kul = self.generate_key(&self.priv_key, auth_protocol)?;
+
+            // Step 2: append Kul' to the existing Kul
+            let copy_len = remaining.min(new_kul.len());
+            self.priv_key.extend_from_slice(&new_kul[..copy_len]);
+            remaining -= copy_len;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum KeyExtension {
+    Blumenthal,
+    Reeder,
+}
+
+impl KeyExtension {
+    pub fn other(&self) -> Self {
+        match self {
+            KeyExtension::Blumenthal => KeyExtension::Reeder,
+            KeyExtension::Reeder => KeyExtension::Blumenthal,
+        }
     }
 }
 
@@ -164,6 +248,7 @@ pub struct Security {
     pub(crate) authentication_password: Vec<u8>,
     pub(crate) auth: Auth,
     pub(crate) auth_protocol: AuthProtocol,
+    pub(crate) key_extension_method: Option<KeyExtension>,
     pub(crate) authoritative_state: AuthoritativeState,
     pub(crate) plain_buf: Vec<u8>,
 }
@@ -175,6 +260,7 @@ impl Security {
             authentication_password: authentication_password.to_vec(),
             auth: Auth::AuthNoPriv,
             auth_protocol: AuthProtocol::Md5,
+            key_extension_method: None,
             authoritative_state: AuthoritativeState::default(),
             plain_buf: Vec::new(),
         }
@@ -188,6 +274,23 @@ impl Security {
     pub fn with_auth_protocol(mut self, auth_protocol: AuthProtocol) -> Self {
         self.auth_protocol = auth_protocol;
         self
+    }
+
+    pub fn with_key_extension_method(mut self, key_extension_method: KeyExtension) -> Self {
+        self.key_extension_method = Some(key_extension_method);
+        self
+    }
+
+    pub(crate) fn another_key_extension_method(&mut self) -> Option<KeyExtension> {
+        if let Auth::AuthPriv { ref cipher, .. } = self.auth {
+            if cipher.priv_key_needs_extension(&self.auth_protocol) {
+                if let Some(used_method) = self.key_extension_method {
+                    self.key_extension_method = Some(used_method.other());
+                    return self.key_extension_method;
+                }
+            }
+        }
+        None
     }
 
     /// Note: the engine_id MUST be provided as a hex array, not as a byte-string.
@@ -224,10 +327,7 @@ impl Security {
         let pkey = PKey::hmac(&self.authoritative_state.auth_key)?;
         let mut signer = Signer::new(self.auth_protocol.digest(), &pkey)?;
         signer.update(data)?;
-        let required_length = signer.len()?;
-        let mut buf = vec![0; required_length];
-        signer.sign(&mut buf)?;
-        Ok(buf)
+        signer.sign_to_vec().map_err(Error::from)
     }
 
     pub(crate) fn update_key(&mut self) -> Result<()> {
@@ -238,11 +338,16 @@ impl Security {
         self.authoritative_state
             .update_auth_key(&self.authentication_password, self.auth_protocol)?;
         if let Auth::AuthPriv {
-            privacy_password, ..
+            cipher,
+            privacy_password,
         } = &self.auth
         {
-            self.authoritative_state
-                .update_priv_key(privacy_password, self.auth_protocol)?;
+            self.authoritative_state.update_priv_key(
+                privacy_password,
+                self.auth_protocol,
+                cipher,
+                &self.key_extension_method,
+            )?;
         }
         Ok(())
     }
@@ -550,6 +655,40 @@ pub enum Cipher {
     Aes256,
 }
 
+impl Cipher {
+    pub fn priv_key_len(&self) -> usize {
+        match self {
+            Cipher::Des => 16,
+            Cipher::Aes128 => 16,
+            Cipher::Aes192 => 24,
+            Cipher::Aes256 => 32,
+        }
+    }
+
+    /// Tells if for given auth_protocol and cipher pair, the priv_key is too short and need to be extended.
+    ///
+    /// The are 5 Auth-Priv pairs, where Auth hasher generates too short input for Priv:
+    /// Auth Kul length vs required Priv key length table:
+    /// Auth Algorithm   Kul Len   DES (16)   AES-128 (16)   AES-192 (24)   AES-256 (32)
+    /// -------------------------------------------------------------------------------
+    /// MD5              16        Enough     Enough         EXTEND         EXTEND
+    /// SHA-1            20        Enough     Enough         EXTEND         EXTEND
+    /// SHA-224          28        Enough     Enough         Enough         EXTEND
+    /// SHA-256          32        Enough     Enough         Enough         Enough
+    /// SHA-384          48        Enough     Enough         Enough         Enough
+    /// SHA-512          64        Enough     Enough         Enough         Enough
+    pub fn priv_key_needs_extension(&self, auth_protocol: &AuthProtocol) -> bool {
+        match (auth_protocol, self) {
+            (AuthProtocol::Md5, Cipher::Aes192)
+            | (AuthProtocol::Md5, Cipher::Aes256)
+            | (AuthProtocol::Sha1, Cipher::Aes192)
+            | (AuthProtocol::Sha1, Cipher::Aes256)
+            | (AuthProtocol::Sha224, Cipher::Aes256) => true,
+            _ => false,
+        }
+    }
+}
+
 impl<'a> Pdu<'a> {
     #[allow(clippy::too_many_lines)]
     pub(crate) fn parse_v3(
@@ -605,14 +744,38 @@ impl<'a> Pdu<'a> {
         let mut prev_engine_time = security.engine_time();
 
         if flags & V3_MSG_FLAGS_AUTH == 0 {
+            // Unauthenticated REPORT (discovery step)
+            // Update engine_id if unknown
             if security.authoritative_state.engine_id.is_empty() {
                 security.authoritative_state.engine_id = engine_id.to_vec();
                 security.update_key()?;
                 is_discovery = true;
-            } else if security.need_auth() {
+            } else if engine_id != security.authoritative_state.engine_id && !engine_id.is_empty() {
+                // If agent reports a different engineID, that’s a mismatch
+                return Err(Error::AuthFailure(AuthErrorKind::EngineIdMismatch));
+            }
+
+            // Many agents include boots/time in the first REPORT.
+            // If provided (non-zero), update authoritative state here.
+            if security.authoritative_state.engine_boots < engine_boots {
+                is_discovery = true;
+                prev_engine_time = engine_time;
+                security
+                    .authoritative_state
+                    .update_authoritative(engine_boots, engine_time);
+            }
+
+            // When in discovery and we updated state, tell caller to retry
+            if is_discovery {
+                return Err(Error::AuthUpdated);
+            }
+
+            // If we still need auth but haven’t updated state, it’s an auth failure
+            if security.need_auth() {
                 return Err(Error::AuthFailure(AuthErrorKind::NotAuthenticated));
             }
         } else {
+            // Authenticated path
             if security.authoritative_state.engine_boots == 0 && engine_boots == 0 {
                 return Err(Error::AuthFailure(AuthErrorKind::EngineBootsNotProvided));
             }
@@ -797,7 +960,7 @@ pub(crate) fn build(
             buf.push_octet_string(&[]);
             buf.push_octet_string(security.engine_id());
         });
-        let (encrypted, salt) = security.encrypt(&pdu_buf).unwrap();
+        let (encrypted, salt) = security.encrypt(&pdu_buf)?;
         priv_params.extend_from_slice(&salt);
         Some(encrypted)
     } else {

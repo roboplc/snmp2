@@ -20,7 +20,10 @@ pub struct AsyncSession {
     community: Vec<u8>,
     req_id: Wrapping<i32>,
     send_pdu: pdu::Buf,
+    #[cfg(not(feature = "heap_buffers"))]
     recv_buf: [u8; BUFFER_SIZE],
+    #[cfg(feature = "heap_buffers")]
+    recv_buf: Box<[u8]>,
     #[cfg(feature = "v3")]
     security: Option<v3::Security>,
 }
@@ -96,7 +99,10 @@ impl AsyncSession {
             community: community.to_vec(),
             req_id: Wrapping(starting_req_id),
             send_pdu: pdu::Buf::default(),
+            #[cfg(not(feature = "heap_buffers"))]
             recv_buf: [0; BUFFER_SIZE],
+            #[cfg(feature = "heap_buffers")]
+            recv_buf: vec![0u8; BUFFER_SIZE].into_boxed_slice(),
             #[cfg(feature = "v3")]
             security: None,
         })
@@ -130,6 +136,27 @@ impl AsyncSession {
             }
         }
         Ok(())
+    }
+
+    /// Checks if KeyExtension affects this session privacy and then re-inits session with different KeyExtension
+    ///
+    /// # Returns
+    /// 'Ok(Some(new_key_extension))' When new_key_extension method was set
+    /// 'Ok(None)' When security disabled
+    /// or Auth type is not AuthPriv
+    /// or when Auth-Priv pair is not the one that needs key extension
+    /// or when KeyExtension was not set for the session.
+    /// 'Err(error)' when 'init()' failed with error returned from 'init()'
+    #[cfg(feature = "v3")]
+    pub async fn try_another_key_extension_method(&mut self) -> Result<Option<v3::KeyExtension>> {
+        if let Some(ref mut security) = self.security {
+            if let Some(new_method) = security.another_key_extension_method() {
+                security.authoritative_state = v3::AuthoritativeState::default();
+                self.init().await?;
+                return Ok(Some(new_method));
+            }
+        }
+        Ok(None)
     }
 
     #[cfg(not(feature = "v3"))]

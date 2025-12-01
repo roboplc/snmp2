@@ -12,7 +12,11 @@ use std::{
 
 pub(crate) struct Buf {
     len: usize,
+    #[cfg(not(feature = "heap_buffers"))]
     buf: [u8; BUFFER_SIZE],
+
+    #[cfg(feature = "heap_buffers")]
+    buf: Box<[u8]>,
 }
 
 impl fmt::Debug for Buf {
@@ -25,7 +29,10 @@ impl Default for Buf {
     fn default() -> Buf {
         Buf {
             len: 0,
+            #[cfg(not(feature = "heap_buffers"))]
             buf: [0; BUFFER_SIZE],
+            #[cfg(feature = "heap_buffers")]
+            buf: vec![0; BUFFER_SIZE].into_boxed_slice(),
         }
     }
 }

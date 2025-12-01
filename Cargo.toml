@@ -28,4 +28,5 @@ tokio = { version = "=1.47" }
 mibs = ["dep:snmptools"]
 tokio = ["dep:tokio"]
 v3 = ["openssl"]
+heap_buffers = []
 full = ["mibs", "tokio", "v3"]
