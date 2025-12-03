@@ -665,6 +665,41 @@ impl<'a> Pdu<'a> {
         Ok(())
     }
 
+    #[cfg(feature = "v3")]
+    pub fn to_bytes_with_security(&self, security: Option<&v3::Security>) -> Result<Vec<u8>> {
+        if self.version == Version::V3 as i64 {
+            let mut buf = Buf::default();
+            let ident = match self.message_type {
+                MessageType::GetRequest => snmp::MSG_GET,
+                MessageType::GetNextRequest => snmp::MSG_GET_NEXT,
+                MessageType::GetBulkRequest => snmp::MSG_GET_BULK,
+                MessageType::Response => snmp::MSG_RESPONSE,
+                MessageType::SetRequest => snmp::MSG_SET,
+                MessageType::InformRequest => snmp::MSG_INFORM,
+                MessageType::Trap => snmp::MSG_TRAP,
+                MessageType::TrapV1 => snmp::MSG_TRAP_V1,
+                MessageType::Report => snmp::MSG_REPORT,
+            };
+
+            let varbind_pairs: Vec<(Oid, Value)> = self.varbinds.clone().collect();
+            let (oids, values): (Vec<Oid>, Vec<Value>) = varbind_pairs.into_iter().unzip();
+            let values_ref: Vec<(&Oid, Value)> = oids.iter().zip(values.into_iter()).collect();
+
+            v3::build(
+                ident,
+                self.req_id,
+                &values_ref,
+                self.error_status,
+                self.error_index,
+                &mut buf,
+                security,
+            )?;
+            Ok(buf.to_vec())
+        } else {
+            self.to_bytes()
+        }
+    }
+
     /// Convert PDU to bytes for UDP communication
     /// Returns a byte slice that can be sent over the network
     pub fn to_bytes(&self) -> Result<Vec<u8>> {

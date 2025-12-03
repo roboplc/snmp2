@@ -319,3 +319,55 @@ fn test_pdu_to_bytes_response() {
     let bytes2 = pdu.as_bytes().unwrap();
     assert_eq!(bytes, bytes2);
 }
+
+#[test]
+#[cfg(feature = "v3")]
+fn test_v3_pdu_to_bytes() {
+    use crate::v3;
+
+    let mut buf = pdu::Buf::default();
+    let security = v3::Security::new(b"public", b"secure")
+        .with_auth_protocol(v3::AuthProtocol::Sha1)
+        .with_auth(v3::Auth::AuthPriv {
+            cipher: v3::Cipher::Aes128,
+            privacy_password: b"privacy_password".to_vec(),
+        })
+        .with_engine_id(&[0x80, 0x00, 0x00, 0x00, 0x01])
+        .unwrap()
+        .with_engine_boots_and_time(1, 100);
+
+    // Build a V3 PDU
+    pdu::build_get(
+        Version::V3,
+        b"",
+        12345,
+        &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+        &mut buf,
+        Some(&security),
+    )
+    .unwrap();
+
+    println!("Original bytes: {:?}", &buf[..]);
+
+    // Parse it to get a Pdu struct
+    let mut security_parse = security.clone();
+    let pdu = Pdu::from_bytes_with_security(&buf, Some(&mut security_parse)).unwrap();
+
+    println!("Parsed PDU: {:?}", pdu);
+
+    assert_eq!(pdu.version().unwrap(), Version::V3);
+
+    // Convert back to bytes using the new method
+    let bytes = pdu.to_bytes_with_security(Some(&security)).unwrap();
+
+    println!("Re-encoded bytes: {:?}", bytes);
+
+    assert!(!bytes.is_empty());
+
+    // Verify we can parse the result again
+    let mut security_reparse = security.clone();
+    let pdu2 = Pdu::from_bytes_with_security(&bytes, Some(&mut security_reparse)).unwrap();
+
+    assert_eq!(pdu2.req_id, 12345);
+    assert_eq!(pdu2.version().unwrap(), Version::V3);
+}

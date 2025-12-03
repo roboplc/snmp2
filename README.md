@@ -139,6 +139,36 @@ let socket = UdpSocket::bind("0.0.0.0:1161").unwrap();
 socket.send_to(&bytes, target_addr).unwrap();
 ```
 
+### With SNMPv3 (requires `v3` feature)
+
+When using SNMPv3, you need to provide the security context to convert the PDU to bytes:
+
+```rust,no_run
+#[cfg(feature = "v3")]
+{
+    use snmp2::{Pdu, v3};
+
+    // Setup security parameters (Authentication and Privacy)
+    let security = v3::Security::new(b"public", b"secure")
+        .with_auth_protocol(v3::AuthProtocol::Sha1)
+        .with_auth(v3::Auth::AuthPriv {
+            cipher: v3::Cipher::Aes128,
+            privacy_password: b"privacy_password".to_vec(),
+        })
+        .with_engine_id(&[0x80, 0x00, 0x00, 0x00, 0x01])
+        .unwrap();
+
+    // Parse a received V3 PDU
+    // Note: You need a mutable reference to security to update authoritative state if needed
+    let mut security_parse = security.clone();
+    let received_pdu = Pdu::from_bytes_with_security(&received_data, Some(&mut security_parse)).unwrap();
+
+    // Convert V3 PDU back to bytes
+    // This uses the security context to encrypt and sign the PDU
+    let bytes = received_pdu.to_bytes_with_security(Some(&security)).unwrap();
+}
+```
+
 For detailed examples, see [USAGE_EXAMPLE.md](USAGE_EXAMPLE.md).
 
 ## Async session
