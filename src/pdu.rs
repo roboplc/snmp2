@@ -338,6 +338,35 @@ pub(crate) fn build(
     Ok(())
 }
 
+pub(crate) fn push_varbinds(buf: &mut Buf, values: &[(&Oid, Value)]) {
+    buf.push_sequence(|buf| {
+        for &(oid, ref val) in values.iter().rev() {
+            buf.push_sequence(|buf| {
+                match *val {
+                    Value::Boolean(b) => buf.push_boolean(b),
+                    Value::Null => buf.push_null(),
+                    Value::Integer(i) => buf.push_integer(i),
+                    Value::OctetString(ostr) => buf.push_octet_string(ostr),
+                    Value::ObjectIdentifier(ref objid) => {
+                        buf.push_object_identifier_raw(objid.as_bytes())
+                    }
+                    Value::IpAddress(ip) => buf.push_ipaddress(ip),
+                    Value::Counter32(i) => buf.push_counter32(i),
+                    Value::Unsigned32(i) => buf.push_unsigned32(i),
+                    Value::Timeticks(tt) => buf.push_timeticks(tt),
+                    Value::Opaque(bytes) => buf.push_opaque(bytes),
+                    Value::Counter64(i) => buf.push_counter64(i),
+                    Value::EndOfMibView => buf.push_endofmibview(),
+                    Value::NoSuchObject => buf.push_nosuchobject(),
+                    Value::NoSuchInstance => buf.push_nosuchinstance(),
+                    _ => return,
+                }
+                buf.push_object_identifier_raw(oid.as_bytes());
+            });
+        }
+    });
+}
+
 #[inline]
 pub(crate) fn build_inner(
     req_id: i32,
@@ -348,32 +377,7 @@ pub(crate) fn build_inner(
     buf: &mut Buf,
 ) {
     buf.push_constructed(ident, |buf| {
-        buf.push_sequence(|buf| {
-            for &(oid, ref val) in values.iter().rev() {
-                buf.push_sequence(|buf| {
-                    match *val {
-                        Value::Boolean(b) => buf.push_boolean(b),
-                        Value::Null => buf.push_null(),
-                        Value::Integer(i) => buf.push_integer(i),
-                        Value::OctetString(ostr) => buf.push_octet_string(ostr),
-                        Value::ObjectIdentifier(ref objid) => {
-                            buf.push_object_identifier_raw(objid.as_bytes());
-                        }
-                        Value::IpAddress(ip) => buf.push_ipaddress(ip),
-                        Value::Counter32(i) => buf.push_counter32(i),
-                        Value::Unsigned32(i) => buf.push_unsigned32(i),
-                        Value::Timeticks(tt) => buf.push_timeticks(tt),
-                        Value::Opaque(bytes) => buf.push_opaque(bytes),
-                        Value::Counter64(i) => buf.push_counter64(i),
-                        Value::EndOfMibView => buf.push_endofmibview(),
-                        Value::NoSuchObject => buf.push_nosuchobject(),
-                        Value::NoSuchInstance => buf.push_nosuchinstance(),
-                        _ => return,
-                    }
-                    buf.push_object_identifier_raw(oid.as_bytes());
-                });
-            }
-        });
+        push_varbinds(buf, values);
         buf.push_integer(non_repeaters.into());
         buf.push_integer(max_repetitions.into());
         buf.push_integer(i64::from(req_id));
@@ -710,18 +714,10 @@ impl<'a> Pdu<'a> {
             return Err(Error::AsnUnsupportedType); // V3 requires special handling
         }
 
-        // Determine the message identifier
-        let ident = match self.message_type {
-            MessageType::GetRequest => snmp::MSG_GET,
-            MessageType::GetNextRequest => snmp::MSG_GET_NEXT,
-            MessageType::GetBulkRequest => snmp::MSG_GET_BULK,
-            MessageType::Response => snmp::MSG_RESPONSE,
-            MessageType::SetRequest => snmp::MSG_SET,
-            MessageType::InformRequest => snmp::MSG_INFORM,
-            MessageType::Trap => snmp::MSG_TRAP,
-            MessageType::TrapV1 => snmp::MSG_TRAP_V1,
-            MessageType::Report => snmp::MSG_REPORT,
-        };
+        // Collect varbinds into a Vec for processing
+        let varbind_pairs: Vec<(Oid, Value)> = self.varbinds.clone().collect();
+        let (oids, values): (Vec<Oid>, Vec<Value>) = varbind_pairs.into_iter().unzip();
+        let values_ref: Vec<(&Oid, Value)> = oids.iter().zip(values.into_iter()).collect();
 
         // Special handling for TrapV1
         if self.message_type == MessageType::TrapV1 {
@@ -729,33 +725,7 @@ impl<'a> Pdu<'a> {
                 buf.reset();
                 buf.push_sequence(|buf| {
                     buf.push_constructed(snmp::MSG_TRAP_V1, |buf| {
-                        // Varbinds
-                        buf.push_sequence(|buf| {
-                            for (oid, val) in self.varbinds.clone() {
-                                buf.push_sequence(|buf| {
-                                    match val {
-                                        Value::Boolean(b) => buf.push_boolean(b),
-                                        Value::Null => buf.push_null(),
-                                        Value::Integer(i) => buf.push_integer(i),
-                                        Value::OctetString(ostr) => buf.push_octet_string(ostr),
-                                        Value::ObjectIdentifier(ref objid) => {
-                                            buf.push_object_identifier_raw(objid.as_bytes())
-                                        }
-                                        Value::IpAddress(ip) => buf.push_ipaddress(ip),
-                                        Value::Counter32(i) => buf.push_counter32(i),
-                                        Value::Unsigned32(i) => buf.push_unsigned32(i),
-                                        Value::Timeticks(tt) => buf.push_timeticks(tt),
-                                        Value::Opaque(bytes) => buf.push_opaque(bytes),
-                                        Value::Counter64(i) => buf.push_counter64(i),
-                                        Value::EndOfMibView => buf.push_endofmibview(),
-                                        Value::NoSuchObject => buf.push_nosuchobject(),
-                                        Value::NoSuchInstance => buf.push_nosuchinstance(),
-                                        _ => return,
-                                    }
-                                    buf.push_object_identifier_raw(oid.as_bytes());
-                                });
-                            }
-                        });
+                        push_varbinds(buf, &values_ref);
                         // Timestamp
                         buf.push_timeticks(trap_info.timestamp);
                         // Specific trap
@@ -778,46 +748,31 @@ impl<'a> Pdu<'a> {
             }
         }
 
-        // For standard PDU, we need to rebuild it using the build_inner function
-        // Collect varbinds into a Vec for processing
-        let varbind_pairs: Vec<(Oid, Value)> = self.varbinds.clone().collect();
+        // Determine the message other identifier
+        let ident = match self.message_type {
+            MessageType::GetRequest => snmp::MSG_GET,
+            MessageType::GetNextRequest => snmp::MSG_GET_NEXT,
+            MessageType::GetBulkRequest => snmp::MSG_GET_BULK,
+            MessageType::Response => snmp::MSG_RESPONSE,
+            MessageType::SetRequest => snmp::MSG_SET,
+            MessageType::InformRequest => snmp::MSG_INFORM,
+            MessageType::Trap => snmp::MSG_TRAP,
+            MessageType::Report => snmp::MSG_REPORT,
+            MessageType::TrapV1 => unreachable!(),
+        };
 
-        buf.reset();
-        buf.push_sequence(|buf| {
-            buf.push_constructed(ident, |buf| {
-                buf.push_sequence(|buf| {
-                    for (oid, val) in varbind_pairs.iter().rev() {
-                        buf.push_sequence(|buf| {
-                            match val {
-                                Value::Boolean(b) => buf.push_boolean(*b),
-                                Value::Null => buf.push_null(),
-                                Value::Integer(i) => buf.push_integer(*i),
-                                Value::OctetString(ostr) => buf.push_octet_string(ostr),
-                                Value::ObjectIdentifier(ref objid) => {
-                                    buf.push_object_identifier_raw(objid.as_bytes())
-                                }
-                                Value::IpAddress(ip) => buf.push_ipaddress(*ip),
-                                Value::Counter32(i) => buf.push_counter32(*i),
-                                Value::Unsigned32(i) => buf.push_unsigned32(*i),
-                                Value::Timeticks(tt) => buf.push_timeticks(*tt),
-                                Value::Opaque(bytes) => buf.push_opaque(bytes),
-                                Value::Counter64(i) => buf.push_counter64(*i),
-                                Value::EndOfMibView => buf.push_endofmibview(),
-                                Value::NoSuchObject => buf.push_nosuchobject(),
-                                Value::NoSuchInstance => buf.push_nosuchinstance(),
-                                _ => return,
-                            }
-                            buf.push_object_identifier_raw(oid.as_bytes());
-                        });
-                    }
-                });
-                buf.push_integer(self.error_index.into());
-                buf.push_integer(self.error_status.into());
-                buf.push_integer(i64::from(self.req_id));
-            });
-            buf.push_octet_string(self.community);
-            buf.push_integer(self.version);
-        });
+        build(
+            self.version()?,
+            self.community,
+            ident,
+            self.req_id,
+            &values_ref,
+            self.error_status,
+            self.error_index,
+            &mut buf,
+            #[cfg(feature = "v3")]
+            None,
+        )?;
 
         Ok(buf.to_vec())
     }
