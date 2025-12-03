@@ -120,6 +120,27 @@ loop {
 }
 ```
 
+## PDU to Bytes Conversion
+
+Convert PDU structures to byte arrays for UDP communication:
+
+```rust,no_run
+use snmp2::{Pdu, Oid, Version};
+use std::net::UdpSocket;
+
+// Parse a received PDU
+let received_pdu = Pdu::from_bytes(&received_data).unwrap();
+
+// Convert PDU back to bytes for forwarding or storage
+let bytes = received_pdu.to_bytes().unwrap();
+
+// Send via UDP socket
+let socket = UdpSocket::bind("0.0.0.0:1161").unwrap();
+socket.send_to(&bytes, target_addr).unwrap();
+```
+
+For detailed examples, see [USAGE_EXAMPLE.md](USAGE_EXAMPLE.md).
+
 ## Async session
 
 ```rust,no_run
@@ -161,14 +182,14 @@ assert_eq!(snmp_oid, snmp_oid2);
 
 # SNMPv3
 
-* Requires `v3` crate feature.
+- Requires `v3` crate feature.
 
-* All cryptographic algorithms are provided by [openssl](https://www.openssl.org/).
+- All cryptographic algorithms are provided by [openssl](https://www.openssl.org/).
 
-* For authentication, supports: MD5 (RFC3414), SHA1 (RFC3414) and non-standard
+- For authentication, supports: MD5 (RFC3414), SHA1 (RFC3414) and non-standard
   SHA224, SHA256, SHA384, SHA512.
 
-* For privacy, supports: DES (RFC3414), AES128-CFB (RFC3826) and non-standard
+- For privacy, supports: DES (RFC3414), AES128-CFB (RFC3826) and non-standard
   AES192-CFB, AES256-CFB. Additional/different AES modes are not supported and
   may require patching the crate.
 

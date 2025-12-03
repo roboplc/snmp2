@@ -253,3 +253,69 @@ fn test_varbinds_no_such_object_no_such_instance_end_of_mib_view() {
     assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .2 .2 .1 .20 .2));
     assert!(matches!(val, Value::Counter32(3)));
 }
+
+#[test]
+fn test_pdu_to_bytes() {
+    // Build a PDU using the build functions
+    let mut buf = pdu::Buf::default();
+    pdu::build_get(
+        Version::V2C,
+        b"public",
+        12345,
+        &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+        &mut buf,
+        #[cfg(feature = "v3")]
+        None,
+    )
+    .unwrap();
+
+    // Parse the PDU from bytes
+    let parsed_pdu = Pdu::from_bytes(&buf).unwrap();
+
+    // Convert the parsed PDU back to bytes
+    let converted_bytes = parsed_pdu.to_bytes().unwrap();
+
+    // The converted bytes should match the original buffer
+    assert_eq!(&buf[..], &converted_bytes[..]);
+
+    // Verify we can parse the converted bytes again
+    let reparsed_pdu = Pdu::from_bytes(&converted_bytes).unwrap();
+    assert_eq!(reparsed_pdu.version, parsed_pdu.version);
+    assert_eq!(reparsed_pdu.community, parsed_pdu.community);
+    assert_eq!(reparsed_pdu.message_type, parsed_pdu.message_type);
+    assert_eq!(reparsed_pdu.req_id, parsed_pdu.req_id);
+}
+
+#[test]
+fn test_pdu_to_bytes_response() {
+    // Build a response PDU
+    let mut buf = pdu::Buf::default();
+    pdu::build(
+        Version::V2C,
+        b"public",
+        snmp::MSG_RESPONSE,
+        99999,
+        &[(
+            &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+            Value::OctetString(b"Test System"),
+        )],
+        0, // error_status
+        0, // error_index
+        &mut buf,
+        #[cfg(feature = "v3")]
+        None,
+    )
+    .unwrap();
+
+    // Parse and convert back
+    let pdu = Pdu::from_bytes(&buf).unwrap();
+    let bytes = pdu.to_bytes().unwrap();
+
+    // Verify the bytes can be used for UDP communication
+    assert!(!bytes.is_empty());
+    assert_eq!(&buf[..], &bytes[..]);
+
+    // Test as_bytes method as well
+    let bytes2 = pdu.as_bytes().unwrap();
+    assert_eq!(bytes, bytes2);
+}

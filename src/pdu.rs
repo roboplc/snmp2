@@ -296,6 +296,11 @@ impl Buf {
         self.push_length(bytes.len());
         self.push_byte(asn1::TYPE_OCTETSTRING);
     }
+
+    /// Convert buffer to Vec<u8> for UDP transmission
+    pub fn to_vec(&self) -> Vec<u8> {
+        (&**self).to_vec()
+    }
 }
 
 /// For reply: non_repeaters = error_status, max_repetitions = error_index
@@ -641,6 +646,7 @@ impl<'a> Pdu<'a> {
             v3_msg_id: 0,
         })
     }
+
     pub(crate) fn validate(
         &self,
         expected_type: MessageType,
@@ -657,5 +663,133 @@ impl<'a> Pdu<'a> {
             return Err(Error::CommunityMismatch);
         }
         Ok(())
+    }
+
+    /// Convert PDU to bytes for UDP communication
+    /// Returns a byte slice that can be sent over the network
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let mut buf = Buf::default();
+
+        #[cfg(feature = "v3")]
+        if self.version == Version::V3 as i64 {
+            return Err(Error::AsnUnsupportedType); // V3 requires special handling
+        }
+
+        // Determine the message identifier
+        let ident = match self.message_type {
+            MessageType::GetRequest => snmp::MSG_GET,
+            MessageType::GetNextRequest => snmp::MSG_GET_NEXT,
+            MessageType::GetBulkRequest => snmp::MSG_GET_BULK,
+            MessageType::Response => snmp::MSG_RESPONSE,
+            MessageType::SetRequest => snmp::MSG_SET,
+            MessageType::InformRequest => snmp::MSG_INFORM,
+            MessageType::Trap => snmp::MSG_TRAP,
+            MessageType::TrapV1 => snmp::MSG_TRAP_V1,
+            MessageType::Report => snmp::MSG_REPORT,
+        };
+
+        // Special handling for TrapV1
+        if self.message_type == MessageType::TrapV1 {
+            if let Some(ref trap_info) = self.v1_trap_info {
+                buf.reset();
+                buf.push_sequence(|buf| {
+                    buf.push_constructed(snmp::MSG_TRAP_V1, |buf| {
+                        // Varbinds
+                        buf.push_sequence(|buf| {
+                            for (oid, val) in self.varbinds.clone() {
+                                buf.push_sequence(|buf| {
+                                    match val {
+                                        Value::Boolean(b) => buf.push_boolean(b),
+                                        Value::Null => buf.push_null(),
+                                        Value::Integer(i) => buf.push_integer(i),
+                                        Value::OctetString(ostr) => buf.push_octet_string(ostr),
+                                        Value::ObjectIdentifier(ref objid) => {
+                                            buf.push_object_identifier_raw(objid.as_bytes())
+                                        }
+                                        Value::IpAddress(ip) => buf.push_ipaddress(ip),
+                                        Value::Counter32(i) => buf.push_counter32(i),
+                                        Value::Unsigned32(i) => buf.push_unsigned32(i),
+                                        Value::Timeticks(tt) => buf.push_timeticks(tt),
+                                        Value::Opaque(bytes) => buf.push_opaque(bytes),
+                                        Value::Counter64(i) => buf.push_counter64(i),
+                                        Value::EndOfMibView => buf.push_endofmibview(),
+                                        Value::NoSuchObject => buf.push_nosuchobject(),
+                                        Value::NoSuchInstance => buf.push_nosuchinstance(),
+                                        _ => return,
+                                    }
+                                    buf.push_object_identifier_raw(oid.as_bytes());
+                                });
+                            }
+                        });
+                        // Timestamp
+                        buf.push_timeticks(trap_info.timestamp);
+                        // Specific trap
+                        buf.push_integer(trap_info.specific_trap);
+                        // Generic trap
+                        buf.push_integer(trap_info.generic_trap);
+                        // Agent address
+                        if let IpAddr::V4(ipv4) = trap_info.agent_addr {
+                            buf.push_ipaddress(ipv4.octets());
+                        }
+                        // Enterprise OID
+                        buf.push_object_identifier_raw(trap_info.enterprise.as_bytes());
+                    });
+                    buf.push_octet_string(self.community);
+                    buf.push_integer(self.version);
+                });
+                return Ok(buf.to_vec());
+            } else {
+                return Err(Error::AsnWrongType);
+            }
+        }
+
+        // For standard PDU, we need to rebuild it using the build_inner function
+        // Collect varbinds into a Vec for processing
+        let varbind_pairs: Vec<(Oid, Value)> = self.varbinds.clone().collect();
+
+        buf.reset();
+        buf.push_sequence(|buf| {
+            buf.push_constructed(ident, |buf| {
+                buf.push_sequence(|buf| {
+                    for (oid, val) in varbind_pairs.iter().rev() {
+                        buf.push_sequence(|buf| {
+                            match val {
+                                Value::Boolean(b) => buf.push_boolean(*b),
+                                Value::Null => buf.push_null(),
+                                Value::Integer(i) => buf.push_integer(*i),
+                                Value::OctetString(ostr) => buf.push_octet_string(ostr),
+                                Value::ObjectIdentifier(ref objid) => {
+                                    buf.push_object_identifier_raw(objid.as_bytes())
+                                }
+                                Value::IpAddress(ip) => buf.push_ipaddress(*ip),
+                                Value::Counter32(i) => buf.push_counter32(*i),
+                                Value::Unsigned32(i) => buf.push_unsigned32(*i),
+                                Value::Timeticks(tt) => buf.push_timeticks(*tt),
+                                Value::Opaque(bytes) => buf.push_opaque(bytes),
+                                Value::Counter64(i) => buf.push_counter64(*i),
+                                Value::EndOfMibView => buf.push_endofmibview(),
+                                Value::NoSuchObject => buf.push_nosuchobject(),
+                                Value::NoSuchInstance => buf.push_nosuchinstance(),
+                                _ => return,
+                            }
+                            buf.push_object_identifier_raw(oid.as_bytes());
+                        });
+                    }
+                });
+                buf.push_integer(self.error_index.into());
+                buf.push_integer(self.error_status.into());
+                buf.push_integer(i64::from(self.req_id));
+            });
+            buf.push_octet_string(self.community);
+            buf.push_integer(self.version);
+        });
+
+        Ok(buf.to_vec())
+    }
+
+    /// Get a reference to the underlying bytes (for zero-copy scenarios)
+    /// Note: This creates a new Vec, for true zero-copy, use `to_bytes` carefully
+    pub fn as_bytes(&self) -> Result<Vec<u8>> {
+        self.to_bytes()
     }
 }
