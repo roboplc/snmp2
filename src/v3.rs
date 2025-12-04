@@ -910,6 +910,7 @@ pub(crate) fn build_init(req_id: i32, buf: &mut Buf) {
     buf.push_sequence(|message| {
         message.push_sequence(|pdu| {
             pdu.push_constructed(snmp::MSG_GET, |req| {
+                req.push_sequence(|varbinds| {});
                 req.push_integer(0); // error index
                 req.push_integer(0); // error status
                 req.push_integer(req_id.into());
