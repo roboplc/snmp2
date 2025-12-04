@@ -169,8 +169,6 @@ When using SNMPv3, you need to provide the security context to convert the PDU t
 }
 ```
 
-For detailed examples, see [USAGE_EXAMPLE.md](USAGE_EXAMPLE.md).
-
 ## Async session
 
 ```rust,no_run
