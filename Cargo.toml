@@ -20,6 +20,7 @@ asn1-rs = "0.6"
 snmptools = { version = "^0.1.2", optional = true }
 tokio = { version = "1.47", features = ["net"], optional = true }
 openssl = { version = "0.10", optional = true }
+aws-lc-rs = { version = "1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "=1.47" }
@@ -28,5 +29,7 @@ tokio = { version = "=1.47" }
 mibs = ["dep:snmptools"]
 tokio = ["dep:tokio"]
 v3 = ["openssl"]
+v3_aws_lc_rs = ["aws-lc-rs"]
 heap_buffers = []
 full = ["mibs", "tokio", "v3"]
+full_aws_lc_rs = ["mibs", "tokio", "v3_aws_lc_rs"]

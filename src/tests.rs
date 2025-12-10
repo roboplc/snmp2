@@ -18,6 +18,8 @@ fn build_get_many_pdu() {
         &mut pdu,
         #[cfg(feature = "v3")]
         None,
+        #[cfg(feature = "v3_aws_lc_rs")]
+        None,
     )
     .unwrap();
 
@@ -54,6 +56,8 @@ fn build_getnext_pdu() {
         &mut pdu,
         #[cfg(feature = "v3")]
         None,
+        #[cfg(feature = "v3_aws_lc_rs")]
+        None,
     )
     .unwrap();
 
@@ -82,6 +86,8 @@ fn build_getbulk_pdu() {
         &mut pdu,
         #[cfg(feature = "v3")]
         None,
+        #[cfg(feature = "v3_aws_lc_rs")]
+        None,
     )
     .unwrap();
 
@@ -109,6 +115,8 @@ fn build_reply_pdu() {
         1,
         &mut buf,
         #[cfg(feature = "v3")]
+        None,
+        #[cfg(feature = "v3_aws_lc_rs")]
         None,
     )
     .unwrap();

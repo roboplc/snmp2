@@ -1,6 +1,10 @@
 #![ doc = include_str!( concat!( env!( "CARGO_MANIFEST_DIR" ), "/", "README.md" ) ) ]
 #![allow(unknown_lints, clippy::doc_markdown)]
 
+// Ensure v3 and v3_aws_lc_rs features are mutually exclusive
+#[cfg(all(feature = "v3", feature = "v3_aws_lc_rs"))]
+compile_error!("Features `v3` and `v3_aws_lc_rs` are mutually exclusive. Choose one.");
+
 use std::fmt;
 
 pub mod asn1;
@@ -14,6 +18,10 @@ mod syncsession;
 pub mod v3;
 #[cfg(feature = "v3")]
 pub use openssl;
+#[cfg(feature = "v3_aws_lc_rs")]
+pub mod v3_aws_lc_rs;
+#[cfg(feature = "v3_aws_lc_rs")]
+pub use aws_lc_rs;
 pub use syncsession::SyncSession;
 #[cfg(feature = "tokio")]
 mod asyncsession;
@@ -94,14 +102,17 @@ pub enum Error {
     /// Buffer overflow.
     BufferOverflow,
 
-    /// Authentication failure
+    /// Authentication failure (OpenSSL-based v3)
     #[cfg(feature = "v3")]
     AuthFailure(v3::AuthErrorKind),
-    /// OpenSSL errors
-    #[cfg(feature = "v3")]
+    /// Authentication failure (aws-lc-rs-based v3_aws_lc_rs)
+    #[cfg(feature = "v3_aws_lc_rs")]
+    AuthFailure(v3_aws_lc_rs::AuthErrorKind),
+    /// Cryptographic engine errors
+    #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
     Crypto(String),
     /// Security context has been updated, repeat the request
-    #[cfg(feature = "v3")]
+    #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
     AuthUpdated,
 
     /// Socket send error.
@@ -128,9 +139,11 @@ impl fmt::Display for Error {
             Error::BufferOverflow => write!(f, "Buffer overflow"),
             #[cfg(feature = "v3")]
             Error::AuthFailure(err) => write!(f, "Authentication failure: {}", err),
-            #[cfg(feature = "v3")]
+            #[cfg(feature = "v3_aws_lc_rs")]
+            Error::AuthFailure(err) => write!(f, "Authentication failure: {}", err),
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             Error::Crypto(e) => write!(f, "Cryptographic engine error: {}", e),
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             Error::AuthUpdated => {
                 write!(f, "Security context has been updated, repeat the request")
             }
