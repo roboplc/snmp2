@@ -13,6 +13,9 @@ use tokio::net::{lookup_host, ToSocketAddrs, UdpSocket};
 #[cfg(feature = "v3")]
 use crate::v3;
 
+#[cfg(feature = "v3_aws_lc_rs")]
+use crate::v3_aws_lc_rs;
+
 /// Asynchronous SNMP client
 pub struct AsyncSession {
     version: Version,
@@ -26,6 +29,8 @@ pub struct AsyncSession {
     recv_buf: Box<[u8]>,
     #[cfg(feature = "v3")]
     security: Option<v3::Security>,
+    #[cfg(feature = "v3_aws_lc_rs")]
+    security: Option<v3_aws_lc_rs::Security>,
 }
 
 impl AsyncSession {
@@ -56,6 +61,21 @@ impl AsyncSession {
         destination: SA,
         starting_req_id: i32,
         security: v3::Security,
+    ) -> io::Result<Self>
+    where
+        SA: ToSocketAddrs,
+    {
+        let mut session = Self::new(Version::V3, destination, &[], starting_req_id).await?;
+        session.community = security.username.clone();
+        session.security = Some(security);
+        Ok(session)
+    }
+
+    #[cfg(feature = "v3_aws_lc_rs")]
+    pub async fn new_v3<SA>(
+        destination: SA,
+        starting_req_id: i32,
+        security: v3_aws_lc_rs::Security,
     ) -> io::Result<Self>
     where
         SA: ToSocketAddrs,
@@ -105,10 +125,12 @@ impl AsyncSession {
             recv_buf: vec![0u8; BUFFER_SIZE].into_boxed_slice(),
             #[cfg(feature = "v3")]
             security: None,
+            #[cfg(feature = "v3_aws_lc_rs")]
+            security: None,
         })
     }
 
-    #[cfg(not(feature = "v3"))]
+    #[cfg(not(any(feature = "v3", feature = "v3_aws_lc_rs")))]
     #[allow(clippy::unused_self, clippy::unused_async)]
     pub async fn init(&mut self) -> Result<()> {
         Ok(())
@@ -138,6 +160,32 @@ impl AsyncSession {
         Ok(())
     }
 
+    #[cfg(feature = "v3_aws_lc_rs")]
+    pub async fn init(&mut self) -> Result<()> {
+        if let Some(ref mut security) = self.security {
+            security.reset_engine_id();
+            security.reset_engine_counters();
+            // send a request to get the engine id
+            let req_id = self.req_id.0;
+            v3_aws_lc_rs::build_init(req_id, &mut self.send_pdu);
+            self.req_id += Wrapping(1);
+            if let Err(e) = Pdu::from_bytes_inner(
+                Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
+                Some(security),
+            ) {
+                if e != Error::AuthUpdated {
+                    return Err(e);
+                }
+            }
+            if security.need_init() {
+                return Err(Error::AuthFailure(
+                    v3_aws_lc_rs::AuthErrorKind::NotAuthenticated,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Checks if KeyExtension affects this session privacy and then re-inits session with different KeyExtension
     ///
     /// # Returns
@@ -159,11 +207,41 @@ impl AsyncSession {
         Ok(None)
     }
 
-    #[cfg(not(feature = "v3"))]
+    /// Checks if KeyExtension affects this session privacy and then re-inits session with different KeyExtension
+    ///
+    /// # Returns
+    /// 'Ok(Some(new_key_extension))' When new_key_extension method was set
+    /// 'Ok(None)' When security disabled
+    /// or Auth type is not AuthPriv
+    /// or when Auth-Priv pair is not the one that needs key extension
+    /// or when KeyExtension was not set for the session.
+    /// 'Err(error)' when 'init()' failed with error returned from 'init()'
+    #[cfg(feature = "v3_aws_lc_rs")]
+    pub async fn try_another_key_extension_method(
+        &mut self,
+    ) -> Result<Option<v3_aws_lc_rs::KeyExtension>> {
+        if let Some(ref mut security) = self.security {
+            if let Some(new_method) = security.another_key_extension_method() {
+                security.authoritative_state = v3_aws_lc_rs::AuthoritativeState::default();
+                self.init().await?;
+                return Ok(Some(new_method));
+            }
+        }
+        Ok(None)
+    }
+
+    #[cfg(not(any(feature = "v3", feature = "v3_aws_lc_rs")))]
     #[allow(clippy::unused_self)]
     fn prepare(&mut self) {}
 
     #[cfg(feature = "v3")]
+    fn prepare(&mut self) {
+        if let Some(ref mut security) = self.security {
+            security.correct_authoritative_engine_time();
+        }
+    }
+
+    #[cfg(feature = "v3_aws_lc_rs")]
     fn prepare(&mut self) {
         if let Some(ref mut security) = self.security {
             security.correct_authoritative_engine_time();
@@ -194,12 +272,12 @@ impl AsyncSession {
             req_id,
             oid,
             &mut self.send_pdu,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_ref(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_mut(),
         )?;
         self.req_id += Wrapping(1);
@@ -216,12 +294,12 @@ impl AsyncSession {
             req_id,
             oids,
             &mut self.send_pdu,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_ref(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_mut(),
         )?;
         self.req_id += Wrapping(1);
@@ -238,12 +316,12 @@ impl AsyncSession {
             req_id,
             oid,
             &mut self.send_pdu,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_ref(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_mut(),
         )?;
         self.req_id += Wrapping(1);
@@ -267,12 +345,12 @@ impl AsyncSession {
             non_repeaters,
             max_repetitions,
             &mut self.send_pdu,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_ref(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_mut(),
         )?;
         self.req_id += Wrapping(1);
@@ -289,12 +367,12 @@ impl AsyncSession {
             req_id,
             values,
             &mut self.send_pdu,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_ref(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             self.security.as_mut(),
         )?;
         self.req_id += Wrapping(1);

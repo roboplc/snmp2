@@ -1,5 +1,7 @@
 #[cfg(feature = "v3")]
 use crate::v3;
+#[cfg(feature = "v3_aws_lc_rs")]
+use crate::v3_aws_lc_rs;
 use crate::{
     asn1::{self, AsnReader},
     snmp, Error, MessageType, Oid, Result, Value, Varbinds, Version, BUFFER_SIZE,
@@ -311,10 +313,23 @@ pub(crate) fn build(
     max_repetitions: u32,
     buf: &mut Buf,
     #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3_aws_lc_rs")] security: Option<&v3_aws_lc_rs::Security>,
 ) -> Result<()> {
     #[cfg(feature = "v3")]
     if version == Version::V3 {
         return v3::build(
+            ident,
+            req_id,
+            values,
+            non_repeaters,
+            max_repetitions,
+            buf,
+            security,
+        );
+    }
+    #[cfg(feature = "v3_aws_lc_rs")]
+    if version == Version::V3 {
+        return v3_aws_lc_rs::build(
             ident,
             req_id,
             values,
@@ -382,6 +397,7 @@ pub(crate) fn build_get(
     oid: &Oid,
     buf: &mut Buf,
     #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3_aws_lc_rs")] security: Option<&v3_aws_lc_rs::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -394,6 +410,8 @@ pub(crate) fn build_get(
         buf,
         #[cfg(feature = "v3")]
         security,
+        #[cfg(feature = "v3_aws_lc_rs")]
+        security,
     )
 }
 
@@ -404,6 +422,7 @@ pub(crate) fn build_get_many(
     oids: &[&Oid],
     buf: &mut Buf,
     #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3_aws_lc_rs")] security: Option<&v3_aws_lc_rs::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -419,6 +438,8 @@ pub(crate) fn build_get_many(
         buf,
         #[cfg(feature = "v3")]
         security,
+        #[cfg(feature = "v3_aws_lc_rs")]
+        security,
     )
 }
 
@@ -429,6 +450,7 @@ pub(crate) fn build_getnext(
     oid: &Oid,
     buf: &mut Buf,
     #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3_aws_lc_rs")] security: Option<&v3_aws_lc_rs::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -440,6 +462,8 @@ pub(crate) fn build_getnext(
         0,
         buf,
         #[cfg(feature = "v3")]
+        security,
+        #[cfg(feature = "v3_aws_lc_rs")]
         security,
     )
 }
@@ -454,6 +478,7 @@ pub(crate) fn build_getbulk(
     max_repetitions: u32,
     buf: &mut Buf,
     #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3_aws_lc_rs")] security: Option<&v3_aws_lc_rs::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -469,6 +494,8 @@ pub(crate) fn build_getbulk(
         buf,
         #[cfg(feature = "v3")]
         security,
+        #[cfg(feature = "v3_aws_lc_rs")]
+        security,
     )
 }
 
@@ -479,6 +506,7 @@ pub(crate) fn build_set(
     values: &[(&Oid, Value)],
     buf: &mut Buf,
     #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3_aws_lc_rs")] security: Option<&v3_aws_lc_rs::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -490,6 +518,8 @@ pub(crate) fn build_set(
         0,
         buf,
         #[cfg(feature = "v3")]
+        security,
+        #[cfg(feature = "v3_aws_lc_rs")]
         security,
     )
 }
@@ -504,7 +534,7 @@ pub struct Pdu<'a> {
     pub error_index: u32,
     pub varbinds: Varbinds<'a>,
     pub v1_trap_info: Option<V1TrapInfo<'a>>,
-    #[cfg(feature = "v3")]
+    #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
     pub v3_msg_id: i32,
 }
 
@@ -548,7 +578,7 @@ impl<'a> Pdu<'a> {
                 specific_trap: specific_code,
                 timestamp,
             }),
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             v3_msg_id: 0,
         })
     }
@@ -556,7 +586,7 @@ impl<'a> Pdu<'a> {
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Pdu<'a>> {
         Self::from_bytes_inner(
             bytes,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             None,
         )
     }
@@ -571,9 +601,20 @@ impl<'a> Pdu<'a> {
         }
     }
 
+    #[cfg(feature = "v3_aws_lc_rs")]
+    pub fn from_bytes_with_security(
+        bytes: &'a [u8],
+        security: Option<&'a mut v3_aws_lc_rs::Security>,
+    ) -> Result<Pdu<'a>> {
+        {
+            Self::from_bytes_inner(bytes, security)
+        }
+    }
+
     pub(crate) fn from_bytes_inner(
         bytes: &'a [u8],
         #[cfg(feature = "v3")] security: Option<&'a mut v3::Security>,
+        #[cfg(feature = "v3_aws_lc_rs")] security: Option<&'a mut v3_aws_lc_rs::Security>,
     ) -> Result<Pdu<'a>> {
         let seq = AsnReader::from_bytes(bytes).read_raw(asn1::TYPE_SEQUENCE)?;
         let mut rdr = AsnReader::from_bytes(seq);
@@ -593,7 +634,16 @@ impl<'a> Pdu<'a> {
                 }
                 return Err(Error::AuthFailure(v3::AuthErrorKind::SecurityNotProvided));
             }
-            #[cfg(not(feature = "v3"))]
+            #[cfg(feature = "v3_aws_lc_rs")]
+            {
+                if let Some(security) = security {
+                    return Self::parse_v3_aws_lc_rs(bytes, rdr, security);
+                }
+                return Err(Error::AuthFailure(
+                    v3_aws_lc_rs::AuthErrorKind::SecurityNotProvided,
+                ));
+            }
+            #[cfg(not(any(feature = "v3", feature = "v3_aws_lc_rs")))]
             {
                 return Err(Error::UnsupportedVersion);
             }
@@ -637,7 +687,7 @@ impl<'a> Pdu<'a> {
             error_index: u32::try_from(error_index)?,
             varbinds,
             v1_trap_info: None,
-            #[cfg(feature = "v3")]
+            #[cfg(any(feature = "v3", feature = "v3_aws_lc_rs"))]
             v3_msg_id: 0,
         })
     }

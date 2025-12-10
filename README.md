@@ -161,6 +161,16 @@ assert_eq!(snmp_oid, snmp_oid2);
 
 # SNMPv3
 
+There are two implementations of SNMPv3 available:
+
+- `v3` feature: Uses OpenSSL for cryptographic operations
+- `v3_aws_lc_rs` feature: Uses aws-lc-rs (FIPS 140-3 certified) for cryptographic operations
+
+**Note:** The `v3` and `v3_aws_lc_rs` features are mutually exclusive. Only one can
+be enabled at a time.
+
+## SNMPv3 with OpenSSL (`v3` feature)
+
 * Requires `v3` crate feature.
 
 * All cryptographic algorithms are provided by [openssl](https://www.openssl.org/).
@@ -175,7 +185,7 @@ assert_eq!(snmp_oid, snmp_oid2);
 Note: DES legacy encryption may be disabled in openssl by default or even not
 supported at all. Refer to the library documentation how to enable it.
 
-## Example
+### Example
 
 Authentication: SHA1, encryption: AES128-CFB
 
@@ -212,7 +222,7 @@ loop {
 }
 ```
 
-## Building
+### Building
 
 In case of problems (e.g. with [cross-rs](https://github.com/cross-rs/cross)),
 add `openssl` with `vendored` feature:
@@ -221,12 +231,63 @@ add `openssl` with `vendored` feature:
 cargo add openssl --features vendored
 ```
 
-## FIPS-140 support
+### FIPS-140 support (OpenSSL)
 
 The crate uses openssl cryptography only and becomes FIPS-140 compliant as soon
 as FIPS mode is activated in `openssl`. Refer to the
 [openssl crate](https://docs.rs/openssl) crate and
 [openssl library](https://www.openssl.org/) documentation for more details.
+
+## SNMPv3 with aws-lc-rs (`v3_aws_lc_rs` feature)
+
+* Requires `v3_aws_lc_rs` crate feature.
+
+* All cryptographic algorithms are provided by [aws-lc-rs](https://crates.io/crates/aws-lc-rs),
+  which is FIPS 140-3 certified (certificate #4816).
+
+* For authentication, supports: SHA1 (RFC3414) and non-standard SHA224, SHA256,
+  SHA384, SHA512. **MD5 is NOT supported** (not FIPS compliant).
+
+* For privacy, supports: AES128-CFB (RFC3826) and non-standard AES192-CFB,
+  AES256-CFB. **DES is NOT supported** (not FIPS compliant).
+
+**Note:** If you need MD5 or DES support for legacy devices, use the `v3`
+feature (OpenSSL-based) instead.
+
+### Example
+
+Authentication: SHA256, encryption: AES256-CFB
+
+```rust,ignore
+use snmp2::{SyncSession, v3_aws_lc_rs, Oid};
+use std::time::Duration;
+
+let security = v3_aws_lc_rs::Security::new(b"public", b"secure")
+    .with_auth_protocol(v3_aws_lc_rs::AuthProtocol::Sha256)
+    .with_auth(v3_aws_lc_rs::Auth::AuthPriv {
+        cipher: v3_aws_lc_rs::Cipher::Aes256,
+        privacy_password: b"secure-encrypt".to_vec(),
+    });
+let mut sess =
+    SyncSession::new_v3("192.168.1.1:161", Some(Duration::from_secs(2)), 0, security).unwrap();
+sess.init().unwrap();
+loop {
+    let res = match sess.get(&Oid::from(&[1, 3, 6, 1, 2, 1, 1, 3, 0]).unwrap()) {
+        Ok(r) => r,
+        Err(snmp2::Error::AuthUpdated) => continue,
+        Err(e) => panic!("{}", e),
+    };
+    println!("{} {:?}", res.version().unwrap(), res.varbinds);
+    std::thread::sleep(Duration::from_secs(1));
+}
+```
+
+### FIPS 140-3 support (aws-lc-rs)
+
+The `v3_aws_lc_rs` feature uses aws-lc-rs which has FIPS 140-3 certification
+(certificate #4816). This provides FIPS compliance without requiring OpenSSL
+FIPS mode configuration. The aws-lc-rs library is maintained by AWS and is the
+cryptographic foundation for AWS services.
 
 ## MSRV
 
