@@ -253,3 +253,121 @@ fn test_varbinds_no_such_object_no_such_instance_end_of_mib_view() {
     assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .2 .2 .1 .20 .2));
     assert!(matches!(val, Value::Counter32(3)));
 }
+
+#[test]
+fn test_pdu_to_bytes() {
+    // Build a PDU using the build functions
+    let mut buf = pdu::Buf::default();
+    pdu::build_get(
+        Version::V2C,
+        b"public",
+        12345,
+        &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+        &mut buf,
+        #[cfg(feature = "v3")]
+        None,
+    )
+    .unwrap();
+
+    // Parse the PDU from bytes
+    let parsed_pdu = Pdu::from_bytes(&buf).unwrap();
+
+    // Convert the parsed PDU back to bytes
+    let converted_bytes = parsed_pdu.to_bytes().unwrap();
+
+    // The converted bytes should match the original buffer
+    assert_eq!(&buf[..], &converted_bytes[..]);
+
+    // Verify we can parse the converted bytes again
+    let reparsed_pdu = Pdu::from_bytes(&converted_bytes).unwrap();
+    assert_eq!(reparsed_pdu.version, parsed_pdu.version);
+    assert_eq!(reparsed_pdu.community, parsed_pdu.community);
+    assert_eq!(reparsed_pdu.message_type, parsed_pdu.message_type);
+    assert_eq!(reparsed_pdu.req_id, parsed_pdu.req_id);
+}
+
+#[test]
+fn test_pdu_to_bytes_response() {
+    // Build a response PDU
+    let mut buf = pdu::Buf::default();
+    pdu::build(
+        Version::V2C,
+        b"public",
+        snmp::MSG_RESPONSE,
+        99999,
+        &[(
+            &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+            Value::OctetString(b"Test System"),
+        )],
+        0, // error_status
+        0, // error_index
+        &mut buf,
+        #[cfg(feature = "v3")]
+        None,
+    )
+    .unwrap();
+
+    // Parse and convert back
+    let pdu = Pdu::from_bytes(&buf).unwrap();
+    let bytes = pdu.to_bytes().unwrap();
+
+    // Verify the bytes can be used for UDP communication
+    assert!(!bytes.is_empty());
+    assert_eq!(&buf[..], &bytes[..]);
+
+    // Test as_bytes method as well
+    let bytes2 = pdu.as_bytes().unwrap();
+    assert_eq!(bytes, bytes2);
+}
+
+#[test]
+#[cfg(feature = "v3")]
+fn test_v3_pdu_to_bytes() {
+    use crate::v3;
+
+    let mut buf = pdu::Buf::default();
+    let security = v3::Security::new(b"public", b"secure")
+        .with_auth_protocol(v3::AuthProtocol::Sha1)
+        .with_auth(v3::Auth::AuthPriv {
+            cipher: v3::Cipher::Aes128,
+            privacy_password: b"privacy_password".to_vec(),
+        })
+        .with_engine_id(&[0x80, 0x00, 0x00, 0x00, 0x01])
+        .unwrap()
+        .with_engine_boots_and_time(1, 100);
+
+    // Build a V3 PDU
+    pdu::build_get(
+        Version::V3,
+        b"",
+        12345,
+        &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+        &mut buf,
+        Some(&security),
+    )
+    .unwrap();
+
+    println!("Original bytes: {:?}", &buf[..]);
+
+    // Parse it to get a Pdu struct
+    let mut security_parse = security.clone();
+    let pdu = Pdu::from_bytes_with_security(&buf, Some(&mut security_parse)).unwrap();
+
+    println!("Parsed PDU: {:?}", pdu);
+
+    assert_eq!(pdu.version().unwrap(), Version::V3);
+
+    // Convert back to bytes using the new method
+    let bytes = pdu.to_bytes_with_security(Some(&security)).unwrap();
+
+    println!("Re-encoded bytes: {:?}", bytes);
+
+    assert!(!bytes.is_empty());
+
+    // Verify we can parse the result again
+    let mut security_reparse = security.clone();
+    let pdu2 = Pdu::from_bytes_with_security(&bytes, Some(&mut security_reparse)).unwrap();
+
+    assert_eq!(pdu2.req_id, 12345);
+    assert_eq!(pdu2.version().unwrap(), Version::V3);
+}

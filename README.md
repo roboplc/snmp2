@@ -120,6 +120,55 @@ loop {
 }
 ```
 
+## PDU to Bytes Conversion
+
+Convert PDU structures to byte arrays for UDP communication:
+
+```rust,no_run
+use snmp2::{Pdu, Oid, Version};
+use std::net::UdpSocket;
+
+// Parse a received PDU
+let received_pdu = Pdu::from_bytes(&received_data).unwrap();
+
+// Convert PDU back to bytes for forwarding or storage
+let bytes = received_pdu.to_bytes().unwrap();
+
+// Send via UDP socket
+let socket = UdpSocket::bind("0.0.0.0:1161").unwrap();
+socket.send_to(&bytes, target_addr).unwrap();
+```
+
+### With SNMPv3 (requires `v3` feature)
+
+When using SNMPv3, you need to provide the security context to convert the PDU to bytes:
+
+```rust,no_run
+#[cfg(feature = "v3")]
+{
+    use snmp2::{Pdu, v3};
+
+    // Setup security parameters (Authentication and Privacy)
+    let security = v3::Security::new(b"public", b"secure")
+        .with_auth_protocol(v3::AuthProtocol::Sha1)
+        .with_auth(v3::Auth::AuthPriv {
+            cipher: v3::Cipher::Aes128,
+            privacy_password: b"privacy_password".to_vec(),
+        })
+        .with_engine_id(&[0x80, 0x00, 0x00, 0x00, 0x01])
+        .unwrap();
+
+    // Parse a received V3 PDU
+    // Note: You need a mutable reference to security to update authoritative state if needed
+    let mut security_parse = security.clone();
+    let received_pdu = Pdu::from_bytes_with_security(&received_data, Some(&mut security_parse)).unwrap();
+
+    // Convert V3 PDU back to bytes
+    // This uses the security context to encrypt and sign the PDU
+    let bytes = received_pdu.to_bytes_with_security(Some(&security)).unwrap();
+}
+```
+
 ## Async session
 
 ```rust,no_run
@@ -161,14 +210,14 @@ assert_eq!(snmp_oid, snmp_oid2);
 
 # SNMPv3
 
-* Requires `v3` crate feature.
+- Requires `v3` crate feature.
 
-* All cryptographic algorithms are provided by [openssl](https://www.openssl.org/).
+- All cryptographic algorithms are provided by [openssl](https://www.openssl.org/).
 
-* For authentication, supports: MD5 (RFC3414), SHA1 (RFC3414) and non-standard
+- For authentication, supports: MD5 (RFC3414), SHA1 (RFC3414) and non-standard
   SHA224, SHA256, SHA384, SHA512.
 
-* For privacy, supports: DES (RFC3414), AES128-CFB (RFC3826) and non-standard
+- For privacy, supports: DES (RFC3414), AES128-CFB (RFC3826) and non-standard
   AES192-CFB, AES256-CFB. Additional/different AES modes are not supported and
   may require patching the crate.
 
