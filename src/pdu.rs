@@ -1,9 +1,8 @@
 #[cfg(feature = "v3")]
 use crate::v3;
 use crate::{
-    BUFFER_SIZE, Error, MessageType, Oid, Result, Value, Varbinds, Version,
     asn1::{self, AsnReader},
-    snmp,
+    snmp, Error, MessageType, Oid, Result, Value, Varbinds, Version, BUFFER_SIZE,
 };
 use std::{
     fmt, mem,

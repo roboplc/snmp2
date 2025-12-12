@@ -5,10 +5,10 @@ use std::{
 };
 
 use crate::{
-    BUFFER_SIZE, Error, MessageType, Oid, Result, Value, Version,
     pdu::{self, Pdu},
+    Error, MessageType, Oid, Result, Value, Version, BUFFER_SIZE,
 };
-use tokio::net::{ToSocketAddrs, UdpSocket, lookup_host};
+use tokio::net::{lookup_host, ToSocketAddrs, UdpSocket};
 
 #[cfg(feature = "v3")]
 use crate::v3;

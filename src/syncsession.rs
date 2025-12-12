@@ -6,8 +6,8 @@ use std::{
 };
 
 use crate::{
-    BUFFER_SIZE, Error, MessageType, Oid, Result, Value, Version,
     pdu::{self, Pdu},
+    Error, MessageType, Oid, Result, Value, Version, BUFFER_SIZE,
 };
 
 #[cfg(feature = "v3")]

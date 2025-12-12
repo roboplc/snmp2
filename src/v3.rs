@@ -7,9 +7,10 @@ use openssl::{
 };
 
 use crate::{
-    AsnReader, BUFFER_SIZE, Error, MessageType, Oid, Pdu, Result, Value, Varbinds, Version, asn1,
+    asn1,
     pdu::{self, Buf},
     snmp::{self, V3_MSG_FLAGS_AUTH, V3_MSG_FLAGS_PRIVACY, V3_MSG_FLAGS_REPORTABLE},
+    AsnReader, Error, MessageType, Oid, Pdu, Result, Value, Varbinds, Version, BUFFER_SIZE,
 };
 
 const ENGINE_TIME_WINDOW: i64 = 150;
