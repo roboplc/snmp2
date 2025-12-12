@@ -1,8 +1,9 @@
 #[cfg(feature = "v3")]
 use crate::v3;
 use crate::{
+    BUFFER_SIZE, Error, MessageType, Oid, Result, Value, Varbinds, Version,
     asn1::{self, AsnReader},
-    snmp, Error, MessageType, Oid, Result, Value, Varbinds, Version, BUFFER_SIZE,
+    snmp,
 };
 use std::{
     fmt, mem,
@@ -299,7 +300,7 @@ impl Buf {
 
     /// Convert buffer to Vec<u8> for UDP transmission
     pub fn to_vec(&self) -> Vec<u8> {
-        (&**self).to_vec()
+        (**self).to_vec()
     }
 }
 
@@ -348,7 +349,7 @@ pub(crate) fn push_varbinds(buf: &mut Buf, values: &[(&Oid, Value)]) {
                     Value::Integer(i) => buf.push_integer(i),
                     Value::OctetString(ostr) => buf.push_octet_string(ostr),
                     Value::ObjectIdentifier(ref objid) => {
-                        buf.push_object_identifier_raw(objid.as_bytes())
+                        buf.push_object_identifier_raw(objid.as_bytes());
                     }
                     Value::IpAddress(ip) => buf.push_ipaddress(ip),
                     Value::Counter32(i) => buf.push_counter32(i),
@@ -575,9 +576,7 @@ impl<'a> Pdu<'a> {
         bytes: &'a [u8],
         security: Option<&'a mut v3::Security>,
     ) -> Result<Pdu<'a>> {
-        {
-            Self::from_bytes_inner(bytes, security)
-        }
+        Self::from_bytes_inner(bytes, security)
     }
 
     pub(crate) fn from_bytes_inner(
@@ -687,7 +686,7 @@ impl<'a> Pdu<'a> {
 
             let varbind_pairs: Vec<(Oid, Value)> = self.varbinds.clone().collect();
             let (oids, values): (Vec<Oid>, Vec<Value>) = varbind_pairs.into_iter().unzip();
-            let values_ref: Vec<(&Oid, Value)> = oids.iter().zip(values.into_iter()).collect();
+            let values_ref: Vec<(&Oid, Value)> = oids.iter().zip(values).collect();
 
             v3::build(
                 ident,
@@ -717,7 +716,7 @@ impl<'a> Pdu<'a> {
         // Collect varbinds into a Vec for processing
         let varbind_pairs: Vec<(Oid, Value)> = self.varbinds.clone().collect();
         let (oids, values): (Vec<Oid>, Vec<Value>) = varbind_pairs.into_iter().unzip();
-        let values_ref: Vec<(&Oid, Value)> = oids.iter().zip(values.into_iter()).collect();
+        let values_ref: Vec<(&Oid, Value)> = oids.iter().zip(values).collect();
 
         // Special handling for TrapV1
         if self.message_type == MessageType::TrapV1 {
@@ -743,9 +742,8 @@ impl<'a> Pdu<'a> {
                     buf.push_integer(self.version);
                 });
                 return Ok(buf.to_vec());
-            } else {
-                return Err(Error::AsnWrongType);
             }
+            return Err(Error::AsnWrongType);
         }
 
         // Determine the message other identifier

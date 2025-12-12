@@ -228,7 +228,7 @@ impl fmt::Debug for Value<'_> {
 }
 
 fn zero_len(val: &[u8]) -> Result<&[u8]> {
-    if val.len() == 0 {
+    if val.is_empty(){
         Ok(val)
     } else {
         Err(Error::AsnInvalidLen)

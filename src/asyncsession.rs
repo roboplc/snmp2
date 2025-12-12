@@ -5,10 +5,10 @@ use std::{
 };
 
 use crate::{
+    BUFFER_SIZE, Error, MessageType, Oid, Result, Value, Version,
     pdu::{self, Pdu},
-    Error, MessageType, Oid, Result, Value, Version, BUFFER_SIZE,
 };
-use tokio::net::{lookup_host, ToSocketAddrs, UdpSocket};
+use tokio::net::{ToSocketAddrs, UdpSocket, lookup_host};
 
 #[cfg(feature = "v3")]
 use crate::v3;
@@ -61,7 +61,7 @@ impl AsyncSession {
         SA: ToSocketAddrs,
     {
         let mut session = Self::new(Version::V3, destination, &[], starting_req_id).await?;
-        session.community = security.username.clone();
+        session.community.clone_from(&security.username);
         session.security = Some(security);
         Ok(session)
     }
@@ -90,7 +90,7 @@ impl AsyncSession {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "No address found",
-                ))
+                ));
             }
         };
         Ok(Self {

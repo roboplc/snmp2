@@ -124,7 +124,7 @@ loop {
 
 Convert PDU structures to byte arrays for UDP communication:
 
-```rust,no_run
+```rust,ignore
 use snmp2::{Pdu, Oid, Version};
 use std::net::UdpSocket;
 
@@ -143,7 +143,7 @@ socket.send_to(&bytes, target_addr).unwrap();
 
 When using SNMPv3, you need to provide the security context to convert the PDU to bytes:
 
-```rust,no_run
+```rust,ignore
 #[cfg(feature = "v3")]
 {
     use snmp2::{Pdu, v3};

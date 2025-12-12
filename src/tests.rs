@@ -231,7 +231,7 @@ fn test_varbinds_no_such_object_no_such_instance_end_of_mib_view() {
     let pair = varbinds.next();
     let (oid, val) = pair.unwrap();
     assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .31 .1 .1 .1 .6 .2));
-    assert!(matches!(val, Value::Counter64(6331739142)));
+    assert!(matches!(val, Value::Counter64(6_331_739_142)));
 
     let pair = varbinds.next();
     let (oid, val) = pair.unwrap();

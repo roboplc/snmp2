@@ -6,8 +6,8 @@ use std::{
 };
 
 use crate::{
+    BUFFER_SIZE, Error, MessageType, Oid, Result, Value, Version,
     pdu::{self, Pdu},
-    Error, MessageType, Oid, Result, Value, Version, BUFFER_SIZE,
 };
 
 #[cfg(feature = "v3")]
@@ -73,7 +73,7 @@ impl SyncSession {
         SA: ToSocketAddrs,
     {
         let mut session = Self::new(Version::V3, destination, &[], timeout, starting_req_id)?;
-        session.community = security.username.clone();
+        session.community.clone_from(&security.username);
         session.security = Some(security);
         Ok(session)
     }
@@ -95,7 +95,7 @@ impl SyncSession {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "No address found",
-                ))
+                ));
             }
         };
         socket.set_read_timeout(timeout)?;
@@ -115,7 +115,7 @@ impl SyncSession {
 
     #[cfg(feature = "v3")]
     pub fn with_security(mut self, mut security: v3::Security) -> Result<Self> {
-        security.username = self.community.clone();
+        security.username.clone_from(&self.community);
         if !security.authentication_password.is_empty()
             || !security.authoritative_state.engine_id.is_empty()
         {

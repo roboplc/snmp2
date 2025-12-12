@@ -7,10 +7,9 @@ use openssl::{
 };
 
 use crate::{
-    asn1,
+    AsnReader, BUFFER_SIZE, Error, MessageType, Oid, Pdu, Result, Value, Varbinds, Version, asn1,
     pdu::{self, Buf},
     snmp::{self, V3_MSG_FLAGS_AUTH, V3_MSG_FLAGS_PRIVACY, V3_MSG_FLAGS_REPORTABLE},
-    AsnReader, Error, MessageType, Oid, Pdu, Result, Value, Varbinds, Version, BUFFER_SIZE,
 };
 
 const ENGINE_TIME_WINDOW: i64 = 150;
@@ -152,8 +151,8 @@ impl AuthoritativeState {
         &mut self,
         privacy_password: &[u8],
         auth_protocol: AuthProtocol,
-        cipher: &Cipher,
-        extension_method: &Option<KeyExtension>,
+        cipher: Cipher,
+        extension_method: Option<&KeyExtension>,
     ) -> Result<()> {
         if self.engine_id.is_empty() {
             self.priv_key.clear();
@@ -165,10 +164,10 @@ impl AuthoritativeState {
         }
         match extension_method.as_ref() {
             Some(KeyExtension::Blumenthal) => {
-                self.extend_priv_key_with_blumenthal_method(cipher.priv_key_len(), auth_protocol)?
+                self.extend_priv_key_with_blumenthal_method(cipher.priv_key_len(), auth_protocol)?;
             }
             Some(KeyExtension::Reeder) => {
-                self.extend_priv_key_with_reeder_method(cipher.priv_key_len(), auth_protocol)?
+                self.extend_priv_key_with_reeder_method(cipher.priv_key_len(), auth_protocol)?;
             }
             None => return Err(Error::AuthFailure(AuthErrorKind::KeyExtensionRequired)),
         }
@@ -345,8 +344,8 @@ impl Security {
             self.authoritative_state.update_priv_key(
                 privacy_password,
                 self.auth_protocol,
-                cipher,
-                &self.key_extension_method,
+                *cipher,
+                self.key_extension_method.as_ref(),
             )?;
         }
         Ok(())
@@ -637,8 +636,7 @@ impl AuthProtocol {
 
     fn truncation_length(self) -> usize {
         match self {
-            AuthProtocol::Md5 => 12,
-            AuthProtocol::Sha1 => 12,
+            AuthProtocol::Md5 | AuthProtocol::Sha1 => 12,
             AuthProtocol::Sha224 => 16,
             AuthProtocol::Sha256 => 24,
             AuthProtocol::Sha384 => 32,
@@ -658,8 +656,7 @@ pub enum Cipher {
 impl Cipher {
     pub fn priv_key_len(&self) -> usize {
         match self {
-            Cipher::Des => 16,
-            Cipher::Aes128 => 16,
+            Cipher::Des | Cipher::Aes128 => 16,
             Cipher::Aes192 => 24,
             Cipher::Aes256 => 32,
         }
@@ -678,6 +675,7 @@ impl Cipher {
     /// SHA-384          48        Enough     Enough         Enough         Enough
     /// SHA-512          64        Enough     Enough         Enough         Enough
     pub fn priv_key_needs_extension(&self, auth_protocol: &AuthProtocol) -> bool {
+        #[allow(clippy::match_like_matches_macro, clippy::unnested_or_patterns)]
         match (auth_protocol, self) {
             (AuthProtocol::Md5, Cipher::Aes192)
             | (AuthProtocol::Md5, Cipher::Aes256)
@@ -702,7 +700,7 @@ impl<'a> Pdu<'a> {
         let msg_id = global_data_rdr.read_asn_integer()?;
         let max_size = global_data_rdr.read_asn_integer()?;
 
-        if max_size > BUFFER_SIZE as i64 {
+        if max_size < 0 || max_size > i64::try_from(BUFFER_SIZE).unwrap() {
             return Err(Error::BufferOverflow);
         }
 
@@ -814,7 +812,7 @@ impl<'a> Pdu<'a> {
             }
 
             unsafe {
-                let auth_params_ptr = bytes.as_ptr().add(auth_params_pos) as *mut u8;
+                let auth_params_ptr = bytes.as_ptr().add(auth_params_pos).cast_mut();
                 // TODO: switch to safe code as the solution may be pretty fragile
                 std::hint::black_box(|| {
                     std::ptr::write_bytes(auth_params_ptr, 0, auth_params.len());
@@ -910,7 +908,7 @@ pub(crate) fn build_init(req_id: i32, buf: &mut Buf) {
     buf.push_sequence(|message| {
         message.push_sequence(|pdu| {
             pdu.push_constructed(snmp::MSG_GET, |req| {
-                req.push_sequence(|varbinds| {});
+                req.push_sequence(|_varbinds| {});
                 req.push_integer(0); // error index
                 req.push_integer(0); // error status
                 req.push_integer(req_id.into());
