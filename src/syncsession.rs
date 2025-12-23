@@ -113,6 +113,12 @@ impl SyncSession {
         })
     }
 
+    /// Returns the version of the session, e.g. Version::V1.
+    /// This is useful for determining whether bulk get is supported.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
     #[cfg(feature = "v3")]
     pub fn with_security(mut self, mut security: v3::Security) -> Result<Self> {
         security.username.clone_from(&self.community);
