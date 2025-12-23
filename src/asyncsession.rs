@@ -108,6 +108,12 @@ impl AsyncSession {
         })
     }
 
+    /// Returns the version of the session, e.g. Version::V1.
+    /// This is useful for determining whether bulk get is supported.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
     #[cfg(not(feature = "v3"))]
     #[allow(clippy::unused_self, clippy::unused_async)]
     pub async fn init(&mut self) -> Result<()> {
