@@ -12,7 +12,7 @@ pub mod snmp;
 mod syncsession;
 #[cfg(feature = "v3")]
 pub mod v3;
-#[cfg(feature = "v3")]
+#[cfg(feature = "v3_openssl")]
 pub use openssl;
 pub use syncsession::SyncSession;
 #[cfg(feature = "tokio")]
@@ -141,7 +141,7 @@ impl fmt::Display for Error {
     }
 }
 
-#[cfg(feature = "v3")]
+#[cfg(feature = "v3_openssl")]
 impl From<openssl::error::ErrorStack> for Error {
     fn from(err: openssl::error::ErrorStack) -> Error {
         Error::Crypto(err.to_string())

@@ -1,9 +1,21 @@
 use std::{fmt, time::Instant};
 
+#[cfg(feature = "v3_openssl")]
 use openssl::{
     hash::{Hasher, MessageDigest},
     pkey::PKey,
     sign::Signer,
+};
+
+#[cfg(feature = "v3_rust")]
+use {
+    aes::{Aes128, Aes192, Aes256},
+    cbc::{Decryptor as CbcDecryptor, Encryptor as CbcEncryptor},
+    cfb_mode::{Decryptor as CfbDecryptor, Encryptor as CfbEncryptor},
+    cipher::{AsyncStreamCipher, BlockDecryptMut, BlockEncryptMut, KeyIvInit},
+    des::Des,
+    digest::{Digest, DynDigest},
+    hmac::{Hmac, Mac},
 };
 
 use crate::{
@@ -324,10 +336,55 @@ impl Security {
         if self.engine_id().is_empty() {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotReady));
         }
-        let pkey = PKey::hmac(&self.authoritative_state.auth_key)?;
-        let mut signer = Signer::new(self.auth_protocol.digest(), &pkey)?;
-        signer.update(data)?;
-        signer.sign_to_vec().map_err(Error::from)
+        #[cfg(feature = "v3_openssl")]
+        {
+            let pkey = PKey::hmac(&self.authoritative_state.auth_key)?;
+            let mut signer = Signer::new(self.auth_protocol.digest(), &pkey)?;
+            signer.update(data)?;
+            signer.sign_to_vec().map_err(Error::from)
+        }
+        #[cfg(feature = "v3_rust")]
+        {
+            let key = &self.authoritative_state.auth_key;
+            match self.auth_protocol {
+                AuthProtocol::Md5 => {
+                    let mut mac = Hmac::<md5::Md5>::new_from_slice(key)
+                        .map_err(|_| Error::Crypto("Invalid key length".into()))?;
+                    mac.update(data);
+                    Ok(mac.finalize().into_bytes().to_vec())
+                }
+                AuthProtocol::Sha1 => {
+                    let mut mac = Hmac::<sha1::Sha1>::new_from_slice(key)
+                        .map_err(|_| Error::Crypto("Invalid key length".into()))?;
+                    mac.update(data);
+                    Ok(mac.finalize().into_bytes().to_vec())
+                }
+                AuthProtocol::Sha224 => {
+                    let mut mac = Hmac::<sha2::Sha224>::new_from_slice(key)
+                        .map_err(|_| Error::Crypto("Invalid key length".into()))?;
+                    mac.update(data);
+                    Ok(mac.finalize().into_bytes().to_vec())
+                }
+                AuthProtocol::Sha256 => {
+                    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key)
+                        .map_err(|_| Error::Crypto("Invalid key length".into()))?;
+                    mac.update(data);
+                    Ok(mac.finalize().into_bytes().to_vec())
+                }
+                AuthProtocol::Sha384 => {
+                    let mut mac = Hmac::<sha2::Sha384>::new_from_slice(key)
+                        .map_err(|_| Error::Crypto("Invalid key length".into()))?;
+                    mac.update(data);
+                    Ok(mac.finalize().into_bytes().to_vec())
+                }
+                AuthProtocol::Sha512 => {
+                    let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)
+                        .map_err(|_| Error::Crypto("Invalid key length".into()))?;
+                    mac.update(data);
+                    Ok(mac.finalize().into_bytes().to_vec())
+                }
+            }
+        }
     }
 
     pub(crate) fn update_key(&mut self) -> Result<()> {
@@ -388,7 +445,13 @@ impl Security {
     fn encrypt_des(&self, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let mut salt = [0; 8];
         salt[..4].copy_from_slice(&u32::try_from(self.engine_boots())?.to_be_bytes());
+        #[cfg(feature = "v3_openssl")]
         openssl::rand::rand_bytes(&mut salt[4..])?;
+        #[cfg(feature = "v3_rust")]
+        {
+            use rand::Rng;
+            rand::rng().fill(&mut salt[4..]);
+        }
 
         if data.is_empty() {
             return Ok((vec![], salt.to_vec()));
@@ -400,65 +463,124 @@ impl Security {
 
         let des_key = &self.authoritative_state.priv_key[..8];
         let pre_iv = &self.authoritative_state.priv_key[8..16];
-        let cipher = openssl::symm::Cipher::des_cbc();
 
         let mut iv = [0; 8];
         for (i, (a, b)) in pre_iv.iter().zip(salt.iter()).enumerate() {
             iv[i] = a ^ b;
         }
 
-        let mut encrypted = vec![0; data.len() + cipher.block_size()];
-        let mut crypter =
-            openssl::symm::Crypter::new(cipher, openssl::symm::Mode::Encrypt, des_key, Some(&iv))?;
-        let mut count = crypter.update(data, &mut encrypted)?;
+        #[cfg(feature = "v3_openssl")]
+        {
+            let cipher = openssl::symm::Cipher::des_cbc();
+            let mut encrypted = vec![0; data.len() + cipher.block_size()];
+            let mut crypter = openssl::symm::Crypter::new(
+                cipher,
+                openssl::symm::Mode::Encrypt,
+                des_key,
+                Some(&iv),
+            )?;
+            let mut count = crypter.update(data, &mut encrypted)?;
 
-        if count < encrypted.len() {
-            count += crypter.finalize(&mut encrypted[count..])?;
+            if count < encrypted.len() {
+                count += crypter.finalize(&mut encrypted[count..])?;
+            }
+
+            encrypted.truncate(count);
+            Ok((encrypted, salt.to_vec()))
         }
+        #[cfg(feature = "v3_rust")]
+        {
+            let mut encryptor = CbcEncryptor::<Des>::new_from_slices(des_key, &iv)
+                .map_err(|e| Error::Crypto(e.to_string()))?;
 
-        encrypted.truncate(count);
-        Ok((encrypted, salt.to_vec()))
+            // PKCS#7 padding
+            let len = data.len();
+            let pad_len = 8 - (len % 8);
+            let mut padded = Vec::with_capacity(len + pad_len);
+            padded.extend_from_slice(data);
+            padded.extend(std::iter::repeat(pad_len as u8).take(pad_len));
+
+            for chunk in padded.chunks_mut(8) {
+                let block = cipher::generic_array::GenericArray::from_mut_slice(chunk);
+                encryptor.encrypt_block_mut(block);
+            }
+
+            Ok((padded, salt.to_vec()))
+        }
     }
 
-    fn encrypt_aes(
-        &self,
-        data: &[u8],
-        cipher: openssl::symm::Cipher,
-        block_size: usize,
-    ) -> Result<(Vec<u8>, Vec<u8>)> {
-        let iv_len = cipher
-            .iv_len()
-            .ok_or_else(|| Error::Crypto("no IV len".to_owned()))?;
-
+    fn encrypt_aes(&self, data: &[u8], key_len: usize) -> Result<(Vec<u8>, Vec<u8>)> {
+        let iv_len = 16;
         let mut iv = Vec::with_capacity(iv_len);
         iv.extend_from_slice(&u32::try_from(self.engine_boots())?.to_be_bytes());
         iv.extend_from_slice(&u32::try_from(self.engine_time())?.to_be_bytes());
         let salt_pos = iv.len();
         iv.resize(iv_len, 0);
 
+        #[cfg(feature = "v3_openssl")]
         openssl::rand::rand_bytes(&mut iv[salt_pos..])?;
-        let key_len = cipher.key_len();
+        #[cfg(feature = "v3_rust")]
+        {
+            use rand::Rng;
+            rand::rng().fill(&mut iv[salt_pos..]);
+        }
 
         if self.authoritative_state.priv_key.len() < key_len {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
         }
 
-        let mut crypter = openssl::symm::Crypter::new(
-            cipher,
-            openssl::symm::Mode::Encrypt,
-            &self.authoritative_state.priv_key[..key_len],
-            Some(&iv),
-        )?;
+        #[cfg(feature = "v3_openssl")]
+        {
+            let cipher = match key_len {
+                16 => openssl::symm::Cipher::aes_128_cfb128(),
+                24 => openssl::symm::Cipher::aes_192_cfb128(),
+                32 => openssl::symm::Cipher::aes_256_cfb128(),
+                _ => return Err(Error::Crypto("Invalid key len".into())),
+            };
 
-        let mut encrypted = vec![0; data.len() + block_size];
-        let mut count = crypter.update(data, &mut encrypted)?;
+            let mut crypter = openssl::symm::Crypter::new(
+                cipher,
+                openssl::symm::Mode::Encrypt,
+                &self.authoritative_state.priv_key[..key_len],
+                Some(&iv),
+            )?;
 
-        if count < encrypted.len() {
-            count += crypter.finalize(&mut encrypted[count..])?;
+            let mut encrypted = vec![0; data.len() + 16];
+            let mut count = crypter.update(data, &mut encrypted)?;
+
+            if count < encrypted.len() {
+                count += crypter.finalize(&mut encrypted[count..])?;
+            }
+
+            encrypted.truncate(count);
+            Ok((encrypted, iv[salt_pos..].to_vec()))
         }
+        #[cfg(feature = "v3_rust")]
+        {
+            let key = &self.authoritative_state.priv_key[..key_len];
+            let mut encrypted = data.to_vec();
 
-        encrypted.truncate(count);
-        Ok((encrypted, iv[salt_pos..].to_vec()))
+            match key_len {
+                16 => {
+                    let encryptor = CfbEncryptor::<Aes128>::new_from_slices(key, &iv)
+                        .map_err(|e| Error::Crypto(e.to_string()))?;
+                    encryptor.encrypt(&mut encrypted);
+                }
+                24 => {
+                    let encryptor = CfbEncryptor::<Aes192>::new_from_slices(key, &iv)
+                        .map_err(|e| Error::Crypto(e.to_string()))?;
+                    encryptor.encrypt(&mut encrypted);
+                }
+                32 => {
+                    let encryptor = CfbEncryptor::<Aes256>::new_from_slices(key, &iv)
+                        .map_err(|e| Error::Crypto(e.to_string()))?;
+                    encryptor.encrypt(&mut encrypted);
+                }
+                _ => return Err(Error::Crypto("Invalid key len".into())),
+            }
+
+            Ok((encrypted, iv[salt_pos..].to_vec()))
+        }
     }
 
     /// encrypts the data
@@ -477,12 +599,13 @@ impl Security {
 
         match cipher_kind {
             Cipher::Des => self.encrypt_des(data),
-            Cipher::Aes128 => self.encrypt_aes(data, openssl::symm::Cipher::aes_128_cfb128(), 16),
-            Cipher::Aes192 => self.encrypt_aes(data, openssl::symm::Cipher::aes_192_cfb128(), 24),
-            Cipher::Aes256 => self.encrypt_aes(data, openssl::symm::Cipher::aes_256_cfb128(), 32),
+            Cipher::Aes128 => self.encrypt_aes(data, 16),
+            Cipher::Aes192 => self.encrypt_aes(data, 24),
+            Cipher::Aes256 => self.encrypt_aes(data, 32),
         }
     }
 
+    #[cfg(feature = "v3_openssl")]
     fn decrypt_data_to_plain_buf(
         &mut self,
         mut crypter: openssl::symm::Crypter,
@@ -509,13 +632,6 @@ impl Security {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
         }
 
-        let cipher = openssl::symm::Cipher::des_cbc();
-        let block_size = 8;
-
-        if encrypted.len() % block_size > 0 {
-            return Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch));
-        }
-
         let des_key = &self.authoritative_state.priv_key[..8];
         let pre_iv = &self.authoritative_state.priv_key[8..16];
         let mut iv = [0; 8];
@@ -524,22 +640,58 @@ impl Security {
             iv[i] = a ^ b;
         }
 
-        let crypter =
-            openssl::symm::Crypter::new(cipher, openssl::symm::Mode::Decrypt, des_key, Some(&iv))?;
-        self.decrypt_data_to_plain_buf(crypter, block_size, encrypted)
+        #[cfg(feature = "v3_openssl")]
+        {
+            let cipher = openssl::symm::Cipher::des_cbc();
+            let block_size = 8;
+
+            if encrypted.len() % block_size > 0 {
+                return Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch));
+            }
+
+            let crypter = openssl::symm::Crypter::new(
+                cipher,
+                openssl::symm::Mode::Decrypt,
+                des_key,
+                Some(&iv),
+            )?;
+            self.decrypt_data_to_plain_buf(crypter, block_size, encrypted)
+        }
+        #[cfg(feature = "v3_rust")]
+        {
+            let block_size = 8;
+            if encrypted.len() % block_size > 0 {
+                return Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch));
+            }
+
+            let mut decryptor = CbcDecryptor::<Des>::new_from_slices(des_key, &iv)
+                .map_err(|e| Error::Crypto(e.to_string()))?;
+
+            self.plain_buf.clear();
+            self.plain_buf.extend_from_slice(encrypted);
+
+            for chunk in self.plain_buf.chunks_mut(8) {
+                let block = cipher::generic_array::GenericArray::from_mut_slice(chunk);
+                decryptor.decrypt_block_mut(block);
+            }
+
+            if let Some(&pad_len) = self.plain_buf.last() {
+                let pad_len = pad_len as usize;
+                if pad_len > 0 && pad_len <= block_size && pad_len <= self.plain_buf.len() {
+                    let new_len = self.plain_buf.len() - pad_len;
+                    self.plain_buf.truncate(new_len);
+                    Ok(())
+                } else {
+                    Err(Error::Crypto("Invalid padding".into()))
+                }
+            } else {
+                Ok(())
+            }
+        }
     }
 
-    fn decrypt_aes(
-        &mut self,
-        encrypted: &[u8],
-        priv_params: &[u8],
-        cipher: openssl::symm::Cipher,
-        block_size: usize,
-    ) -> Result<()> {
-        let iv_len = cipher
-            .iv_len()
-            .ok_or_else(|| Error::Crypto("no IV len".to_owned()))?;
-
+    fn decrypt_aes(&mut self, encrypted: &[u8], priv_params: &[u8], key_len: usize) -> Result<()> {
+        let iv_len = 16;
         let mut iv = Vec::with_capacity(iv_len);
         iv.extend_from_slice(&u32::try_from(self.engine_boots())?.to_be_bytes());
         iv.extend_from_slice(&u32::try_from(self.engine_time())?.to_be_bytes());
@@ -549,19 +701,54 @@ impl Security {
             return Err(Error::AuthFailure(AuthErrorKind::PrivLengthMismatch));
         }
 
-        let key_len = cipher.key_len();
         if self.authoritative_state.priv_key.len() < key_len {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
         }
 
-        let crypter = openssl::symm::Crypter::new(
-            cipher,
-            openssl::symm::Mode::Decrypt,
-            &self.authoritative_state.priv_key[..key_len],
-            Some(&iv),
-        )?;
+        #[cfg(feature = "v3_openssl")]
+        {
+            let cipher = match key_len {
+                16 => openssl::symm::Cipher::aes_128_cfb128(),
+                24 => openssl::symm::Cipher::aes_192_cfb128(),
+                32 => openssl::symm::Cipher::aes_256_cfb128(),
+                _ => return Err(Error::Crypto("Invalid key len".into())),
+            };
 
-        self.decrypt_data_to_plain_buf(crypter, block_size, encrypted)
+            let crypter = openssl::symm::Crypter::new(
+                cipher,
+                openssl::symm::Mode::Decrypt,
+                &self.authoritative_state.priv_key[..key_len],
+                Some(&iv),
+            )?;
+
+            self.decrypt_data_to_plain_buf(crypter, 16, encrypted)
+        }
+        #[cfg(feature = "v3_rust")]
+        {
+            let key = &self.authoritative_state.priv_key[..key_len];
+            self.plain_buf.clear();
+            self.plain_buf.extend_from_slice(encrypted);
+
+            match key_len {
+                16 => {
+                    let decryptor = CfbDecryptor::<Aes128>::new_from_slices(key, &iv)
+                        .map_err(|e| Error::Crypto(e.to_string()))?;
+                    decryptor.decrypt(&mut self.plain_buf);
+                }
+                24 => {
+                    let decryptor = CfbDecryptor::<Aes192>::new_from_slices(key, &iv)
+                        .map_err(|e| Error::Crypto(e.to_string()))?;
+                    decryptor.decrypt(&mut self.plain_buf);
+                }
+                32 => {
+                    let decryptor = CfbDecryptor::<Aes256>::new_from_slices(key, &iv)
+                        .map_err(|e| Error::Crypto(e.to_string()))?;
+                    decryptor.decrypt(&mut self.plain_buf);
+                }
+                _ => return Err(Error::Crypto("Invalid key len".into())),
+            }
+            Ok(())
+        }
     }
 
     /// decrypts the data, the result is stored in `self.plain_buf`
@@ -576,24 +763,9 @@ impl Security {
 
         match cipher_kind {
             Cipher::Des => self.decrypt_des(encrypted, priv_params),
-            Cipher::Aes128 => self.decrypt_aes(
-                encrypted,
-                priv_params,
-                openssl::symm::Cipher::aes_128_cfb128(),
-                16,
-            ),
-            Cipher::Aes192 => self.decrypt_aes(
-                encrypted,
-                priv_params,
-                openssl::symm::Cipher::aes_192_cfb128(),
-                24,
-            ),
-            Cipher::Aes256 => self.decrypt_aes(
-                encrypted,
-                priv_params,
-                openssl::symm::Cipher::aes_256_cfb128(),
-                32,
-            ),
+            Cipher::Aes128 => self.decrypt_aes(encrypted, priv_params, 16),
+            Cipher::Aes192 => self.decrypt_aes(encrypted, priv_params, 24),
+            Cipher::Aes256 => self.decrypt_aes(encrypted, priv_params, 32),
         }
     }
 }
@@ -610,6 +782,25 @@ pub enum Auth {
     },
 }
 
+#[cfg(feature = "v3_rust")]
+pub struct Hasher(Box<dyn DynDigest + Send + Sync>);
+
+#[cfg(feature = "v3_rust")]
+impl Hasher {
+    pub fn new(d: Box<dyn DynDigest + Send + Sync>) -> Result<Self> {
+        Ok(Self(d))
+    }
+
+    pub fn update(&mut self, data: &[u8]) -> Result<()> {
+        self.0.update(data);
+        Ok(())
+    }
+
+    pub fn finish(&mut self) -> Result<Vec<u8>> {
+        Ok(self.0.finalize_reset().to_vec())
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum AuthProtocol {
     Md5,
@@ -622,8 +813,24 @@ pub enum AuthProtocol {
 
 impl AuthProtocol {
     fn create_hasher(self) -> Result<Hasher> {
-        Hasher::new(self.digest()).map_err(Into::into)
+        #[cfg(feature = "v3_openssl")]
+        {
+            Hasher::new(self.digest()).map_err(Into::into)
+        }
+        #[cfg(feature = "v3_rust")]
+        {
+            let d: Box<dyn DynDigest + Send + Sync> = match self {
+                AuthProtocol::Md5 => Box::new(md5::Md5::new()),
+                AuthProtocol::Sha1 => Box::new(sha1::Sha1::new()),
+                AuthProtocol::Sha224 => Box::new(sha2::Sha224::new()),
+                AuthProtocol::Sha256 => Box::new(sha2::Sha256::new()),
+                AuthProtocol::Sha384 => Box::new(sha2::Sha384::new()),
+                AuthProtocol::Sha512 => Box::new(sha2::Sha512::new()),
+            };
+            Hasher::new(d)
+        }
     }
+    #[cfg(feature = "v3_openssl")]
     fn digest(self) -> MessageDigest {
         match self {
             AuthProtocol::Md5 => MessageDigest::md5(),
