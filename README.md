@@ -302,7 +302,7 @@ The `crypto-rust` backend does not rely on OpenSSL and is not FIPS-certified.
 
 ## MSRV
 
-1.83.0
+1.90.0
 
 ## Copyright
 
