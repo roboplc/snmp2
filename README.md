@@ -125,7 +125,7 @@ loop {
 Convert PDU structures to byte arrays for UDP communication:
 
 ```rust,ignore
-use snmp2::{Pdu, Oid, Version};
+use snmp2::Pdu;
 use std::net::UdpSocket;
 
 // Parse a received PDU
@@ -172,7 +172,6 @@ When using SNMPv3, you need to provide the security context to convert the PDU t
 ## Async session
 
 ```rust,no_run
-use std::time::Duration;
 use snmp2::{AsyncSession, Value, Oid};
 
 async fn get_next() {
