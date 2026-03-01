@@ -6,8 +6,8 @@ use std::{
 };
 
 use crate::{
+    BUFFER_SIZE, Error, MessageType, Oid, Result, Value, Version,
     pdu::{self, Pdu},
-    Error, MessageType, Oid, Result, Value, Version, BUFFER_SIZE,
 };
 
 #[cfg(feature = "v3")]
@@ -89,8 +89,8 @@ impl SyncSession {
         SA: ToSocketAddrs,
     {
         let socket = match destination.to_socket_addrs()?.next() {
-            Some(SocketAddr::V4(_)) => UdpSocket::bind((Ipv4Addr::new(0, 0, 0, 0), 0))?,
-            Some(SocketAddr::V6(_)) => UdpSocket::bind((Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0), 0))?,
+            Some(SocketAddr::V4(_)) => UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?,
+            Some(SocketAddr::V6(_)) => UdpSocket::bind((Ipv6Addr::UNSPECIFIED, 0))?,
             None => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -107,6 +107,7 @@ impl SyncSession {
             community: community.to_vec(),
             req_id: Wrapping(starting_req_id),
             send_pdu: pdu::Buf::default(),
+            #[allow(clippy::large_stack_arrays)]
             recv_buf: [0; BUFFER_SIZE],
             #[cfg(feature = "v3")]
             security: None,
@@ -163,10 +164,9 @@ impl SyncSession {
             if let Err(e) = Pdu::from_bytes_inner(
                 Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
                 Some(security),
-            ) {
-                if e != Error::AuthUpdated {
-                    return Err(e);
-                }
+            ) && e != Error::AuthUpdated
+            {
+                return Err(e);
             }
             if security.need_init() {
                 return Err(Error::AuthFailure(v3::AuthErrorKind::NotAuthenticated));
@@ -186,12 +186,12 @@ impl SyncSession {
     /// 'Err(error)' when 'init()' failed with error returned from 'init()'
     #[cfg(feature = "v3")]
     pub fn try_another_key_extension_method(&mut self) -> Result<Option<v3::KeyExtension>> {
-        if let Some(ref mut security) = self.security {
-            if let Some(new_method) = security.another_key_extension_method() {
-                security.authoritative_state = v3::AuthoritativeState::default();
-                self.init()?;
-                return Ok(Some(new_method));
-            }
+        if let Some(ref mut security) = self.security
+            && let Some(new_method) = security.another_key_extension_method()
+        {
+            security.authoritative_state = v3::AuthoritativeState::default();
+            self.init()?;
+            return Ok(Some(new_method));
         }
         Ok(None)
     }
@@ -207,7 +207,7 @@ impl SyncSession {
         }
     }
 
-    pub fn get(&mut self, oid: &Oid) -> Result<Pdu> {
+    pub fn get(&mut self, oid: &Oid) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_get(
@@ -229,7 +229,7 @@ impl SyncSession {
         Ok(resp)
     }
 
-    pub fn get_many(&mut self, oids: &[&Oid<'_>]) -> Result<Pdu> {
+    pub fn get_many(&mut self, oids: &[&Oid<'_>]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_get_many(
@@ -251,7 +251,7 @@ impl SyncSession {
         Ok(resp)
     }
 
-    pub fn getnext(&mut self, oid: &Oid) -> Result<Pdu> {
+    pub fn getnext(&mut self, oid: &Oid) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_getnext(
@@ -278,7 +278,7 @@ impl SyncSession {
         oids: &[&Oid],
         non_repeaters: u32,
         max_repetitions: u32,
-    ) -> Result<Pdu> {
+    ) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_getbulk(
@@ -302,7 +302,7 @@ impl SyncSession {
         Ok(resp)
     }
 
-    pub fn set(&mut self, values: &[(&Oid, Value)]) -> Result<Pdu> {
+    pub fn set(&mut self, values: &[(&Oid, Value)]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_set(

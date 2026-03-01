@@ -1,8 +1,9 @@
 #[cfg(feature = "v3")]
 use crate::v3;
 use crate::{
+    BUFFER_SIZE, Error, MessageType, Oid, Result, Value, Varbinds, Version,
     asn1::{self, AsnReader},
-    snmp, Error, MessageType, Oid, Result, Value, Varbinds, Version, BUFFER_SIZE,
+    snmp,
 };
 use std::{
     fmt, mem,
@@ -26,6 +27,7 @@ impl fmt::Debug for Buf {
 }
 
 impl Default for Buf {
+    #[allow(clippy::large_stack_arrays)]
     fn default() -> Buf {
         Buf {
             len: 0,

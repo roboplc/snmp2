@@ -5,10 +5,10 @@ use std::{
 };
 
 use crate::{
+    BUFFER_SIZE, Error, MessageType, Oid, Result, Value, Version,
     pdu::{self, Pdu},
-    Error, MessageType, Oid, Result, Value, Version, BUFFER_SIZE,
 };
-use tokio::net::{lookup_host, ToSocketAddrs, UdpSocket};
+use tokio::net::{ToSocketAddrs, UdpSocket, lookup_host};
 
 #[cfg(feature = "v3")]
 use crate::v3;
@@ -77,12 +77,12 @@ impl AsyncSession {
     {
         let socket = match lookup_host(destination).await?.next() {
             Some(SocketAddr::V4(addr)) => {
-                let s = UdpSocket::bind((Ipv4Addr::new(0, 0, 0, 0), 0)).await?;
+                let s = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
                 s.connect(addr).await?;
                 s
             }
             Some(SocketAddr::V6(addr)) => {
-                let s = UdpSocket::bind((Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0), 0)).await?;
+                let s = UdpSocket::bind((Ipv6Addr::UNSPECIFIED, 0)).await?;
                 s.connect(addr).await?;
                 s
             }
@@ -100,6 +100,7 @@ impl AsyncSession {
             req_id: Wrapping(starting_req_id),
             send_pdu: pdu::Buf::default(),
             #[cfg(not(feature = "heap_buffers"))]
+            #[allow(clippy::large_stack_arrays)]
             recv_buf: [0; BUFFER_SIZE],
             #[cfg(feature = "heap_buffers")]
             recv_buf: vec![0u8; BUFFER_SIZE].into_boxed_slice(),
@@ -132,10 +133,9 @@ impl AsyncSession {
             if let Err(e) = Pdu::from_bytes_inner(
                 Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
                 Some(security),
-            ) {
-                if e != Error::AuthUpdated {
-                    return Err(e);
-                }
+            ) && e != Error::AuthUpdated
+            {
+                return Err(e);
             }
             if security.need_init() {
                 return Err(Error::AuthFailure(v3::AuthErrorKind::NotAuthenticated));
@@ -155,12 +155,12 @@ impl AsyncSession {
     /// 'Err(error)' when 'init()' failed with error returned from 'init()'
     #[cfg(feature = "v3")]
     pub async fn try_another_key_extension_method(&mut self) -> Result<Option<v3::KeyExtension>> {
-        if let Some(ref mut security) = self.security {
-            if let Some(new_method) = security.another_key_extension_method() {
-                security.authoritative_state = v3::AuthoritativeState::default();
-                self.init().await?;
-                return Ok(Some(new_method));
-            }
+        if let Some(ref mut security) = self.security
+            && let Some(new_method) = security.another_key_extension_method()
+        {
+            security.authoritative_state = v3::AuthoritativeState::default();
+            self.init().await?;
+            return Ok(Some(new_method));
         }
         Ok(None)
     }
@@ -191,7 +191,7 @@ impl AsyncSession {
         }
     }
 
-    pub async fn get(&mut self, oid: &Oid<'_>) -> Result<Pdu> {
+    pub async fn get(&mut self, oid: &Oid<'_>) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_get(
@@ -213,7 +213,7 @@ impl AsyncSession {
         Ok(resp)
     }
 
-    pub async fn get_many(&mut self, oids: &[&Oid<'_>]) -> Result<Pdu> {
+    pub async fn get_many(&mut self, oids: &[&Oid<'_>]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_get_many(
@@ -235,7 +235,7 @@ impl AsyncSession {
         Ok(resp)
     }
 
-    pub async fn getnext(&mut self, oid: &Oid<'_>) -> Result<Pdu> {
+    pub async fn getnext(&mut self, oid: &Oid<'_>) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_getnext(
@@ -262,7 +262,7 @@ impl AsyncSession {
         oids: &[&Oid<'_>],
         non_repeaters: u32,
         max_repetitions: u32,
-    ) -> Result<Pdu> {
+    ) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_getbulk(
@@ -286,7 +286,7 @@ impl AsyncSession {
         Ok(resp)
     }
 
-    pub async fn set(&mut self, values: &[(&Oid<'_>, Value<'_>)]) -> Result<Pdu> {
+    pub async fn set(&mut self, values: &[(&Oid<'_>, Value<'_>)]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_set(

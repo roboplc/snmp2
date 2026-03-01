@@ -19,10 +19,9 @@ use {
 };
 
 use crate::{
-    asn1,
+    AsnReader, BUFFER_SIZE, Error, MessageType, Oid, Pdu, Result, Value, Varbinds, Version, asn1,
     pdu::{self, Buf},
     snmp::{self, V3_MSG_FLAGS_AUTH, V3_MSG_FLAGS_PRIVACY, V3_MSG_FLAGS_REPORTABLE},
-    AsnReader, Error, MessageType, Oid, Pdu, Result, Value, Varbinds, Version, BUFFER_SIZE,
 };
 
 const ENGINE_TIME_WINDOW: i64 = 150;
@@ -144,7 +143,8 @@ impl AuthoritativeState {
         password_buf.extend_from_slice(&self.engine_id);
         password_buf.extend_from_slice(&key);
         hasher.update(&password_buf)?;
-        Ok(hasher.finish()?.clone())
+        #[allow(clippy::implicit_clone)]
+        Ok(hasher.finish()?.to_vec())
     }
 
     fn update_auth_key(
@@ -294,13 +294,12 @@ impl Security {
     }
 
     pub(crate) fn another_key_extension_method(&mut self) -> Option<KeyExtension> {
-        if let Auth::AuthPriv { ref cipher, .. } = self.auth {
-            if cipher.priv_key_needs_extension(&self.auth_protocol) {
-                if let Some(used_method) = self.key_extension_method {
-                    self.key_extension_method = Some(used_method.other());
-                    return self.key_extension_method;
-                }
-            }
+        if let Auth::AuthPriv { ref cipher, .. } = self.auth
+            && cipher.priv_key_needs_extension(&self.auth_protocol)
+            && let Some(used_method) = self.key_extension_method
+        {
+            self.key_extension_method = Some(used_method.other());
+            return self.key_extension_method;
         }
         None
     }
@@ -498,7 +497,7 @@ impl Security {
             let pad_len = 8 - (len % 8);
             let mut padded = Vec::with_capacity(len + pad_len);
             padded.extend_from_slice(data);
-            padded.extend(std::iter::repeat(u8::try_from(pad_len)?).take(pad_len));
+            padded.extend(std::iter::repeat_n(u8::try_from(pad_len)?, pad_len));
 
             for chunk in padded.chunks_mut(8) {
                 let block = cipher::generic_array::GenericArray::from_mut_slice(chunk);
@@ -645,7 +644,7 @@ impl Security {
             let cipher = openssl::symm::Cipher::des_cbc();
             let block_size = 8;
 
-            if encrypted.len() % block_size > 0 {
+            if !encrypted.len().is_multiple_of(block_size) {
                 return Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch));
             }
 
@@ -660,7 +659,7 @@ impl Security {
         #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
         {
             let block_size = 8;
-            if encrypted.len() % block_size > 0 {
+            if !encrypted.len().is_multiple_of(block_size) {
                 return Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch));
             }
 

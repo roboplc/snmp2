@@ -143,7 +143,7 @@ impl fmt::Display for Error {
             }
             Error::Send => write!(f, "Socket send error"),
             Error::Receive => write!(f, "Socket receive error"),
-            Error::Mib(ref s) => write!(f, "MIB error: {}", s),
+            Error::Mib(s) => write!(f, "MIB error: {}", s),
         }
     }
 }

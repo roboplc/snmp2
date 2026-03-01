@@ -1,7 +1,7 @@
 use crate::{MessageType, Pdu, Value};
 
-use super::{pdu, snmp, Oid};
 use super::{AsnReader, Error, Varbinds, Version};
+use super::{Oid, pdu, snmp};
 use asn1_rs::oid;
 
 #[test]
@@ -230,27 +230,27 @@ fn test_varbinds_no_such_object_no_such_instance_end_of_mib_view() {
 
     let pair = varbinds.next();
     let (oid, val) = pair.unwrap();
-    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .31 .1 .1 .1 .6 .2));
+    assert_eq!(oid, oid!(1.3.6.1.2.1.31.1.1.1.6.2));
     assert!(matches!(val, Value::Counter64(6_331_739_142)));
 
     let pair = varbinds.next();
     let (oid, val) = pair.unwrap();
-    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .999));
+    assert_eq!(oid, oid!(1.3.6.1.2.1.999));
     assert!(matches!(val, Value::NoSuchObject));
 
     let pair = varbinds.next();
     let (oid, val) = pair.unwrap();
-    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .998));
+    assert_eq!(oid, oid!(1.3.6.1.2.1.998));
     assert!(matches!(val, Value::NoSuchInstance));
 
     let pair = varbinds.next();
     let (oid, val) = pair.unwrap();
-    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .997));
+    assert_eq!(oid, oid!(1.3.6.1.2.1.997));
     assert!(matches!(val, Value::EndOfMibView));
 
     let pair = varbinds.next();
     let (oid, val) = pair.unwrap();
-    assert_eq!(oid, oid!(1.3.6 .1 .2 .1 .2 .2 .1 .20 .2));
+    assert_eq!(oid, oid!(1.3.6.1.2.1.2.2.1.20.2));
     assert!(matches!(val, Value::Counter32(3)));
 }
 

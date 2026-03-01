@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{mem, ptr};
 
-use crate::{snmp, Error, Oid, Result, USIZE_LEN};
+use crate::{Error, Oid, Result, USIZE_LEN, snmp};
 
 pub const PRIMITIVE: u8 = 0b0000_0000;
 pub const CONSTRUCTED: u8 = 0b0010_0000;
@@ -48,7 +48,7 @@ impl fmt::Debug for AsnReader<'_> {
 }
 
 impl<'a> AsnReader<'a> {
-    pub fn from_bytes(bytes: &[u8]) -> AsnReader {
+    pub fn from_bytes(bytes: &[u8]) -> AsnReader<'_> {
         AsnReader { inner: bytes }
     }
 
@@ -97,7 +97,7 @@ impl<'a> AsnReader<'a> {
                 }
                 bytes[(USIZE_LEN - length_len)..].copy_from_slice(&tail[..length_len]);
 
-                o = unsafe { mem::transmute::<[u8; USIZE_LEN], usize>(bytes).to_be() };
+                o = usize::from_be_bytes(bytes);
                 self.inner = &tail[length_len..];
                 Ok(o)
             }
@@ -260,7 +260,7 @@ fn decode_i64(i: &[u8]) -> Result<i64> {
     let mut bytes = [0u8; 8];
     bytes[(mem::size_of::<i64>() - i.len())..].copy_from_slice(i);
 
-    let mut ret = unsafe { mem::transmute::<[u8; 8], i64>(bytes).to_be() };
+    let mut ret = i64::from_be_bytes(bytes);
     {
         //sign extend
         let shift_amount = (mem::size_of::<i64>() - i.len()) * 8;
