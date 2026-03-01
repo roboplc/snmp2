@@ -144,7 +144,7 @@ impl AuthoritativeState {
         password_buf.extend_from_slice(&self.engine_id);
         password_buf.extend_from_slice(&key);
         hasher.update(&password_buf)?;
-        Ok(hasher.finish()?.to_vec())
+        Ok(hasher.finish()?.clone())
     }
 
     fn update_auth_key(
@@ -498,7 +498,7 @@ impl Security {
             let pad_len = 8 - (len % 8);
             let mut padded = Vec::with_capacity(len + pad_len);
             padded.extend_from_slice(data);
-            padded.extend(std::iter::repeat(pad_len as u8).take(pad_len));
+            padded.extend(std::iter::repeat(u8::try_from(pad_len)?).take(pad_len));
 
             for chunk in padded.chunks_mut(8) {
                 let block = cipher::generic_array::GenericArray::from_mut_slice(chunk);

@@ -1,7 +1,11 @@
 #![ doc = include_str!( concat!( env!( "CARGO_MANIFEST_DIR" ), "/", "README.md" ) ) ]
 #![allow(unknown_lints, clippy::doc_markdown)]
 
-#[cfg(all(feature = "v3", not(feature = "crypto-openssl"), not(feature = "crypto-rust")))]
+#[cfg(all(
+    feature = "v3",
+    not(feature = "crypto-openssl"),
+    not(feature = "crypto-rust")
+))]
 compile_error!("feature \"v3\" requires one of \"crypto-openssl\" or \"crypto-rust\"");
 
 use std::fmt;
