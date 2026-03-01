@@ -7,7 +7,7 @@ use openssl::{
     sign::Signer,
 };
 
-#[cfg(feature = "crypto-rust")]
+#[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
 use {
     aes::{Aes128, Aes192, Aes256},
     cbc::{Decryptor as CbcDecryptor, Encryptor as CbcEncryptor},
@@ -343,7 +343,7 @@ impl Security {
             signer.update(data)?;
             signer.sign_to_vec().map_err(Error::from)
         }
-        #[cfg(feature = "crypto-rust")]
+        #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
         {
             let key = &self.authoritative_state.auth_key;
             match self.auth_protocol {
@@ -447,7 +447,7 @@ impl Security {
         salt[..4].copy_from_slice(&u32::try_from(self.engine_boots())?.to_be_bytes());
         #[cfg(feature = "crypto-openssl")]
         openssl::rand::rand_bytes(&mut salt[4..])?;
-        #[cfg(feature = "crypto-rust")]
+        #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
         {
             use rand::Rng;
             rand::rng().fill(&mut salt[4..]);
@@ -488,7 +488,7 @@ impl Security {
             encrypted.truncate(count);
             Ok((encrypted, salt.to_vec()))
         }
-        #[cfg(feature = "crypto-rust")]
+        #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
         {
             let mut encryptor = CbcEncryptor::<Des>::new_from_slices(des_key, &iv)
                 .map_err(|e| Error::Crypto(e.to_string()))?;
@@ -519,7 +519,7 @@ impl Security {
 
         #[cfg(feature = "crypto-openssl")]
         openssl::rand::rand_bytes(&mut iv[salt_pos..])?;
-        #[cfg(feature = "crypto-rust")]
+        #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
         {
             use rand::Rng;
             rand::rng().fill(&mut iv[salt_pos..]);
@@ -555,7 +555,7 @@ impl Security {
             encrypted.truncate(count);
             Ok((encrypted, iv[salt_pos..].to_vec()))
         }
-        #[cfg(feature = "crypto-rust")]
+        #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
         {
             let key = &self.authoritative_state.priv_key[..key_len];
             let mut encrypted = data.to_vec();
@@ -657,7 +657,7 @@ impl Security {
             )?;
             self.decrypt_data_to_plain_buf(crypter, block_size, encrypted)
         }
-        #[cfg(feature = "crypto-rust")]
+        #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
         {
             let block_size = 8;
             if encrypted.len() % block_size > 0 {
@@ -723,7 +723,7 @@ impl Security {
 
             self.decrypt_data_to_plain_buf(crypter, 16, encrypted)
         }
-        #[cfg(feature = "crypto-rust")]
+        #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
         {
             let key = &self.authoritative_state.priv_key[..key_len];
             self.plain_buf.clear();
@@ -782,10 +782,10 @@ pub enum Auth {
     },
 }
 
-#[cfg(feature = "crypto-rust")]
+#[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
 pub struct Hasher(Box<dyn DynDigest + Send + Sync>);
 
-#[cfg(feature = "crypto-rust")]
+#[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
 impl Hasher {
     pub fn new(d: Box<dyn DynDigest + Send + Sync>) -> Result<Self> {
         Ok(Self(d))
@@ -817,7 +817,7 @@ impl AuthProtocol {
         {
             Hasher::new(self.digest()).map_err(Into::into)
         }
-        #[cfg(feature = "crypto-rust")]
+        #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
         {
             let d: Box<dyn DynDigest + Send + Sync> = match self {
                 AuthProtocol::Md5 => Box::new(md5::Md5::new()),

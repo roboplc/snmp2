@@ -228,6 +228,10 @@ assert_eq!(snmp_oid, snmp_oid2);
 Note: For `crypto-openssl`, DES legacy encryption may be disabled in OpenSSL by default
 or not supported at all. Refer to the library documentation how to enable it.
 
+Note: if both `crypto-openssl` and `crypto-rust` features are enabled,
+`crypto-openssl` will have higher priority and will be used as the crypto
+backend.
+
 ### Feature selection examples
 
 Pure Rust backend:
