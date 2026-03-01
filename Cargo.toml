@@ -43,7 +43,7 @@ mibs = ["dep:snmptools"]
 tokio = ["dep:tokio"]
 v3 = []
 heap_buffers = []
-full = ["mibs", "tokio", "crypto-rust"]
+full = ["mibs", "tokio", "v3", "crypto-rust"]
 
 crypto-openssl = ["v3", "openssl"]
 crypto-rust = ["v3", "md-5", "sha1", "digest", "sha2", "aes", "cipher", "des", "hmac", "cbc", "cfb-mode", "rand"]
