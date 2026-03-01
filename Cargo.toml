@@ -10,10 +10,10 @@ readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
 
 [package.metadata.docs.rs]
-features = ["full", "openssl/vendored"]
+features = ["full"]
 
 [package.metadata.playground]
-features = ["v3", "tokio", "openssl/vendored"]
+features = ["v3", "tokio"]
 
 [dependencies]
 asn1-rs = "0.6"
