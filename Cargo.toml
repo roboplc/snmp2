@@ -1,6 +1,6 @@
 [package]
 name = "snmp2"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 description = "SNMP v1/v2/v3 sync/async client library with traps and MIB support"
 authors = ["Serhij S. <div@altertech.com>"]
@@ -13,7 +13,7 @@ keywords = ["networking", "snmp", "monitoring"]
 features = ["full"]
 
 [package.metadata.playground]
-features = ["v3", "tokio"]
+features = ["full", "tokio"]
 
 [dependencies]
 asn1-rs = "0.6"
