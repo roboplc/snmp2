@@ -37,13 +37,13 @@ rand = { version = "0.9", optional = true }
 tokio = { version = "1" }
 
 [features]
-default = ["tokio", "v3_rust"]
+default = ["tokio", "crypto-rust"]
 
 mibs = ["dep:snmptools"]
 tokio = ["dep:tokio"]
 v3 = []
 heap_buffers = []
-full = ["mibs", "tokio", "v3_rust"]
+full = ["mibs", "tokio", "crypto-rust"]
 
-v3_openssl = ["v3", "openssl"]
-v3_rust = ["v3", "md-5", "sha1", "digest", "sha2", "aes", "cipher", "des", "hmac", "cbc", "cfb-mode", "rand"]
+crypto-openssl = ["v3", "openssl"]
+crypto-rust = ["v3", "md-5", "sha1", "digest", "sha2", "aes", "cipher", "des", "hmac", "cbc", "cfb-mode", "rand"]

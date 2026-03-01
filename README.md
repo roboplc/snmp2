@@ -36,7 +36,7 @@ Supports:
 - Synchronous/Asynchronous requests
 - UDP transport
 - MIBs (with `mibs` feature, requires `libnetsnmp`)
-- SNMP v3 (enable `v3_openssl` or `v3_rust` feature)
+- SNMP v3 (enable `crypto-openssl` or `crypto-rust` feature)
 
 # Examples
 
@@ -139,7 +139,7 @@ let socket = UdpSocket::bind("0.0.0.0:1161").unwrap();
 socket.send_to(&bytes, target_addr).unwrap();
 ```
 
-### With SNMPv3 (enable `v3_openssl` or `v3_rust`)
+### With SNMPv3 (enable `crypto-openssl` or `crypto-rust`)
 
 When using SNMPv3, you need to provide the security context to convert the PDU to bytes:
 
@@ -210,13 +210,13 @@ assert_eq!(snmp_oid, snmp_oid2);
 
 # SNMPv3
 
-- Requires enabling one of the features: `v3_openssl` or `v3_rust`.
-  - `v3_openssl`: uses OpenSSL for hashing/HMAC and symmetric encryption.
-  - `v3_rust`: uses pure Rust crypto crates for hashing/HMAC and encryption.
+- Requires enabling one of the features: `crypto-openssl` or `crypto-rust`.
+  - `crypto-openssl`: uses OpenSSL for hashing/HMAC and symmetric encryption.
+  - `crypto-rust`: uses pure Rust crypto crates for hashing/HMAC and encryption.
 
 - Cryptographic algorithms are provided by the selected backend:
-  - `v3_openssl`: [openssl](https://www.openssl.org/)
-  - `v3_rust`: pure Rust crates [Rust Crypto](https://github.com/RustCrypto): (`md-5`, `sha1`, `sha2`, `hmac`, `aes`, `des`, etc.)
+  - `crypto-openssl`: [openssl](https://www.openssl.org/)
+  - `crypto-rust`: pure Rust crates [Rust Crypto](https://github.com/RustCrypto): (`md-5`, `sha1`, `sha2`, `hmac`, `aes`, `des`, etc.)
 
 - For authentication, supports: MD5 (RFC3414), SHA1 (RFC3414) and non-standard
   SHA224, SHA256, SHA384, SHA512.
@@ -225,7 +225,7 @@ assert_eq!(snmp_oid, snmp_oid2);
   AES192-CFB, AES256-CFB. Additional/different AES modes are not supported and
   may require patching the crate.
 
-Note: For `v3_openssl`, DES legacy encryption may be disabled in OpenSSL by default
+Note: For `crypto-openssl`, DES legacy encryption may be disabled in OpenSSL by default
 or not supported at all. Refer to the library documentation how to enable it.
 
 ### Feature selection examples
@@ -233,13 +233,13 @@ or not supported at all. Refer to the library documentation how to enable it.
 Pure Rust backend:
 
 ```shell
-cargo add snmp2 --features v3_rust
+cargo add snmp2 --features crypto-rust
 ```
 
 OpenSSL backend (Windows-friendly vendored build):
 
 ```shell
-cargo add snmp2 --features "v3_openssl,openssl/vendored"
+cargo add snmp2 --features "crypto-openssl,openssl/vendored"
 ```
 
 ## Example
@@ -279,22 +279,22 @@ loop {
 }
 ```
 
-## Building (`v3_openssl`)
+## Building (`crypto-openssl`)
 
-When using the `v3_openssl` backend, in case of problems (e.g. with
+When using the `crypto-openssl` backend, in case of problems (e.g. with
 [cross-rs](https://github.com/cross-rs/cross)), add `openssl` with `vendored` feature:
 
 ```shell
 cargo add openssl --features vendored
 ```
 
-## FIPS-140 support (`v3_openssl`)
+## FIPS-140 support (`crypto-openssl`)
 
-When using the `v3_openssl` backend, the crate becomes FIPS-140 compliant as soon
+When using the `crypto-openssl` backend, the crate becomes FIPS-140 compliant as soon
 as FIPS mode is activated in `openssl`. Refer to the
 [openssl crate](https://docs.rs/openssl) crate and
 [openssl library](https://www.openssl.org/) documentation for more details.
-The `v3_rust` backend does not rely on OpenSSL and is not FIPS-certified.
+The `crypto-rust` backend does not rely on OpenSSL and is not FIPS-certified.
 
 ## MSRV
 

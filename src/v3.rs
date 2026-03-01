@@ -1,13 +1,13 @@
 use std::{fmt, time::Instant};
 
-#[cfg(feature = "v3_openssl")]
+#[cfg(feature = "crypto-openssl")]
 use openssl::{
     hash::{Hasher, MessageDigest},
     pkey::PKey,
     sign::Signer,
 };
 
-#[cfg(feature = "v3_rust")]
+#[cfg(feature = "crypto-rust")]
 use {
     aes::{Aes128, Aes192, Aes256},
     cbc::{Decryptor as CbcDecryptor, Encryptor as CbcEncryptor},
@@ -336,14 +336,14 @@ impl Security {
         if self.engine_id().is_empty() {
             return Err(Error::AuthFailure(AuthErrorKind::SecurityNotReady));
         }
-        #[cfg(feature = "v3_openssl")]
+        #[cfg(feature = "crypto-openssl")]
         {
             let pkey = PKey::hmac(&self.authoritative_state.auth_key)?;
             let mut signer = Signer::new(self.auth_protocol.digest(), &pkey)?;
             signer.update(data)?;
             signer.sign_to_vec().map_err(Error::from)
         }
-        #[cfg(feature = "v3_rust")]
+        #[cfg(feature = "crypto-rust")]
         {
             let key = &self.authoritative_state.auth_key;
             match self.auth_protocol {
@@ -445,9 +445,9 @@ impl Security {
     fn encrypt_des(&self, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let mut salt = [0; 8];
         salt[..4].copy_from_slice(&u32::try_from(self.engine_boots())?.to_be_bytes());
-        #[cfg(feature = "v3_openssl")]
+        #[cfg(feature = "crypto-openssl")]
         openssl::rand::rand_bytes(&mut salt[4..])?;
-        #[cfg(feature = "v3_rust")]
+        #[cfg(feature = "crypto-rust")]
         {
             use rand::Rng;
             rand::rng().fill(&mut salt[4..]);
@@ -469,7 +469,7 @@ impl Security {
             iv[i] = a ^ b;
         }
 
-        #[cfg(feature = "v3_openssl")]
+        #[cfg(feature = "crypto-openssl")]
         {
             let cipher = openssl::symm::Cipher::des_cbc();
             let mut encrypted = vec![0; data.len() + cipher.block_size()];
@@ -488,7 +488,7 @@ impl Security {
             encrypted.truncate(count);
             Ok((encrypted, salt.to_vec()))
         }
-        #[cfg(feature = "v3_rust")]
+        #[cfg(feature = "crypto-rust")]
         {
             let mut encryptor = CbcEncryptor::<Des>::new_from_slices(des_key, &iv)
                 .map_err(|e| Error::Crypto(e.to_string()))?;
@@ -517,9 +517,9 @@ impl Security {
         let salt_pos = iv.len();
         iv.resize(iv_len, 0);
 
-        #[cfg(feature = "v3_openssl")]
+        #[cfg(feature = "crypto-openssl")]
         openssl::rand::rand_bytes(&mut iv[salt_pos..])?;
-        #[cfg(feature = "v3_rust")]
+        #[cfg(feature = "crypto-rust")]
         {
             use rand::Rng;
             rand::rng().fill(&mut iv[salt_pos..]);
@@ -529,7 +529,7 @@ impl Security {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
         }
 
-        #[cfg(feature = "v3_openssl")]
+        #[cfg(feature = "crypto-openssl")]
         {
             let cipher = match key_len {
                 16 => openssl::symm::Cipher::aes_128_cfb128(),
@@ -555,7 +555,7 @@ impl Security {
             encrypted.truncate(count);
             Ok((encrypted, iv[salt_pos..].to_vec()))
         }
-        #[cfg(feature = "v3_rust")]
+        #[cfg(feature = "crypto-rust")]
         {
             let key = &self.authoritative_state.priv_key[..key_len];
             let mut encrypted = data.to_vec();
@@ -605,7 +605,7 @@ impl Security {
         }
     }
 
-    #[cfg(feature = "v3_openssl")]
+    #[cfg(feature = "crypto-openssl")]
     fn decrypt_data_to_plain_buf(
         &mut self,
         mut crypter: openssl::symm::Crypter,
@@ -640,7 +640,7 @@ impl Security {
             iv[i] = a ^ b;
         }
 
-        #[cfg(feature = "v3_openssl")]
+        #[cfg(feature = "crypto-openssl")]
         {
             let cipher = openssl::symm::Cipher::des_cbc();
             let block_size = 8;
@@ -657,7 +657,7 @@ impl Security {
             )?;
             self.decrypt_data_to_plain_buf(crypter, block_size, encrypted)
         }
-        #[cfg(feature = "v3_rust")]
+        #[cfg(feature = "crypto-rust")]
         {
             let block_size = 8;
             if encrypted.len() % block_size > 0 {
@@ -705,7 +705,7 @@ impl Security {
             return Err(Error::AuthFailure(AuthErrorKind::KeyLengthMismatch));
         }
 
-        #[cfg(feature = "v3_openssl")]
+        #[cfg(feature = "crypto-openssl")]
         {
             let cipher = match key_len {
                 16 => openssl::symm::Cipher::aes_128_cfb128(),
@@ -723,7 +723,7 @@ impl Security {
 
             self.decrypt_data_to_plain_buf(crypter, 16, encrypted)
         }
-        #[cfg(feature = "v3_rust")]
+        #[cfg(feature = "crypto-rust")]
         {
             let key = &self.authoritative_state.priv_key[..key_len];
             self.plain_buf.clear();
@@ -782,10 +782,10 @@ pub enum Auth {
     },
 }
 
-#[cfg(feature = "v3_rust")]
+#[cfg(feature = "crypto-rust")]
 pub struct Hasher(Box<dyn DynDigest + Send + Sync>);
 
-#[cfg(feature = "v3_rust")]
+#[cfg(feature = "crypto-rust")]
 impl Hasher {
     pub fn new(d: Box<dyn DynDigest + Send + Sync>) -> Result<Self> {
         Ok(Self(d))
@@ -813,11 +813,11 @@ pub enum AuthProtocol {
 
 impl AuthProtocol {
     fn create_hasher(self) -> Result<Hasher> {
-        #[cfg(feature = "v3_openssl")]
+        #[cfg(feature = "crypto-openssl")]
         {
             Hasher::new(self.digest()).map_err(Into::into)
         }
-        #[cfg(feature = "v3_rust")]
+        #[cfg(feature = "crypto-rust")]
         {
             let d: Box<dyn DynDigest + Send + Sync> = match self {
                 AuthProtocol::Md5 => Box::new(md5::Md5::new()),
@@ -830,7 +830,7 @@ impl AuthProtocol {
             Hasher::new(d)
         }
     }
-    #[cfg(feature = "v3_openssl")]
+    #[cfg(feature = "crypto-openssl")]
     fn digest(self) -> MessageDigest {
         match self {
             AuthProtocol::Md5 => MessageDigest::md5(),
