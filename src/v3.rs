@@ -263,6 +263,7 @@ pub struct Security {
     pub(crate) key_extension_method: Option<KeyExtension>,
     pub(crate) authoritative_state: AuthoritativeState,
     pub(crate) plain_buf: Vec<u8>,
+    pub(crate) context_name: Vec<u8>,
 }
 
 impl Security {
@@ -275,6 +276,7 @@ impl Security {
             key_extension_method: None,
             authoritative_state: AuthoritativeState::default(),
             plain_buf: Vec::new(),
+            context_name: Vec::new(),
         }
     }
 
@@ -285,6 +287,11 @@ impl Security {
 
     pub fn with_auth_protocol(mut self, auth_protocol: AuthProtocol) -> Self {
         self.auth_protocol = auth_protocol;
+        self
+    }
+
+    pub fn with_context_name(mut self, context_name: &str) -> Self {
+        self.context_name = context_name.as_bytes().to_vec();
         self
     }
 
@@ -1163,7 +1170,7 @@ pub(crate) fn build(
         let mut pdu_buf = Buf::default();
         pdu_buf.push_sequence(|buf| {
             pdu::build_inner(req_id, ident, values, max_repetitions, non_repeaters, buf);
-            buf.push_octet_string(&[]);
+            buf.push_octet_string(&security.context_name);
             buf.push_octet_string(security.engine_id());
         });
         let (encrypted, salt) = security.encrypt(&pdu_buf)?;
@@ -1179,7 +1186,7 @@ pub(crate) fn build(
         } else {
             buf.push_sequence(|buf| {
                 pdu::build_inner(req_id, ident, values, max_repetitions, non_repeaters, buf);
-                buf.push_octet_string(&[]);
+                buf.push_octet_string(&security.context_name);
                 buf.push_octet_string(security.engine_id());
             });
         }
