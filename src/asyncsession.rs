@@ -133,9 +133,10 @@ impl AsyncSession {
             if let Err(e) = Pdu::from_bytes_inner(
                 Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
                 Some(security),
-            ) && e != Error::AuthUpdated
-            {
-                return Err(e);
+            ) {
+                if e != Error::AuthUpdated {
+                    return Err(e);
+                }
             }
             if security.need_init() {
                 return Err(Error::AuthFailure(v3::AuthErrorKind::NotAuthenticated));
@@ -155,12 +156,12 @@ impl AsyncSession {
     /// 'Err(error)' when 'init()' failed with error returned from 'init()'
     #[cfg(feature = "v3")]
     pub async fn try_another_key_extension_method(&mut self) -> Result<Option<v3::KeyExtension>> {
-        if let Some(ref mut security) = self.security
-            && let Some(new_method) = security.another_key_extension_method()
-        {
-            security.authoritative_state = v3::AuthoritativeState::default();
-            self.init().await?;
-            return Ok(Some(new_method));
+        if let Some(ref mut security) = self.security {
+            if let Some(new_method) = security.another_key_extension_method() {
+                security.authoritative_state = v3::AuthoritativeState::default();
+                self.init().await?;
+                return Ok(Some(new_method));
+            }
         }
         Ok(None)
     }

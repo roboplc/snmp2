@@ -301,12 +301,13 @@ impl Security {
     }
 
     pub(crate) fn another_key_extension_method(&mut self) -> Option<KeyExtension> {
-        if let Auth::AuthPriv { ref cipher, .. } = self.auth
-            && cipher.priv_key_needs_extension(&self.auth_protocol)
-            && let Some(used_method) = self.key_extension_method
-        {
-            self.key_extension_method = Some(used_method.other());
-            return self.key_extension_method;
+        if let Auth::AuthPriv { ref cipher, .. } = self.auth {
+            if cipher.priv_key_needs_extension(&self.auth_protocol) {
+                if let Some(used_method) = self.key_extension_method {
+                    self.key_extension_method = Some(used_method.other());
+                    return self.key_extension_method;
+                }
+            }
         }
         None
     }
