@@ -356,37 +356,37 @@ impl Security {
                 AuthProtocol::Md5 => {
                     let mut mac = Hmac::<md5::Md5>::new_from_slice(key)
                         .map_err(|_| Error::Crypto("Invalid key length".into()))?;
-                    mac.update(data);
+                    Mac::update(&mut mac, data);
                     Ok(mac.finalize().into_bytes().to_vec())
                 }
                 AuthProtocol::Sha1 => {
                     let mut mac = Hmac::<sha1::Sha1>::new_from_slice(key)
                         .map_err(|_| Error::Crypto("Invalid key length".into()))?;
-                    mac.update(data);
+                    Mac::update(&mut mac, data);
                     Ok(mac.finalize().into_bytes().to_vec())
                 }
                 AuthProtocol::Sha224 => {
                     let mut mac = Hmac::<sha2::Sha224>::new_from_slice(key)
                         .map_err(|_| Error::Crypto("Invalid key length".into()))?;
-                    mac.update(data);
+                    Mac::update(&mut mac, data);
                     Ok(mac.finalize().into_bytes().to_vec())
                 }
                 AuthProtocol::Sha256 => {
                     let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key)
                         .map_err(|_| Error::Crypto("Invalid key length".into()))?;
-                    mac.update(data);
+                    Mac::update(&mut mac, data);
                     Ok(mac.finalize().into_bytes().to_vec())
                 }
                 AuthProtocol::Sha384 => {
                     let mut mac = Hmac::<sha2::Sha384>::new_from_slice(key)
                         .map_err(|_| Error::Crypto("Invalid key length".into()))?;
-                    mac.update(data);
+                    Mac::update(&mut mac, data);
                     Ok(mac.finalize().into_bytes().to_vec())
                 }
                 AuthProtocol::Sha512 => {
                     let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)
                         .map_err(|_| Error::Crypto("Invalid key length".into()))?;
-                    mac.update(data);
+                    Mac::update(&mut mac, data);
                     Ok(mac.finalize().into_bytes().to_vec())
                 }
             }
