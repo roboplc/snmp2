@@ -1,6 +1,6 @@
 [package]
 name = "snmp2"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 description = "SNMP v1/v2/v3 sync/async client library with traps and MIB support"
 authors = ["Serhij S. <div@altertech.com>"]
