@@ -12,6 +12,7 @@ pub trait MibConversion {
     fn from_mib_name(name: &str) -> Result<Self>
     where
         Self: Sized;
+    fn asn_type(&self) -> Result<u8>;
 }
 
 impl MibConversion for Oid<'_> {
@@ -26,5 +27,15 @@ impl MibConversion for Oid<'_> {
         Ok(snmptools::get_oid(name)
             .map_err(move |e| crate::Error::Mib(e.to_string()))?
             .to_owned())
+    }
+
+    fn asn_type(&self) -> Result<u8> {
+        let val = snmptools::get_type(self).map_err(|e| crate::Error::Mib(e.to_string()))?;
+        if val == 255 {
+            return Err(crate::Error::Mib(
+                format! {"netsnmp:mib_to_asn_type returned 255 (not found) for {self}"},
+            ));
+        }
+        Ok(val)
     }
 }
