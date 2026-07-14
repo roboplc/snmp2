@@ -681,18 +681,7 @@ impl Security {
                 decryptor.decrypt_block_mut(block);
             }
 
-            if let Some(&pad_len) = self.plain_buf.last() {
-                let pad_len = pad_len as usize;
-                if pad_len > 0 && pad_len <= block_size && pad_len <= self.plain_buf.len() {
-                    let new_len = self.plain_buf.len() - pad_len;
-                    self.plain_buf.truncate(new_len);
-                    Ok(())
-                } else {
-                    Err(Error::Crypto("Invalid padding".into()))
-                }
-            } else {
-                Ok(())
-            }
+            Ok(())
         }
     }
 
