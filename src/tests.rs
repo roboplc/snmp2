@@ -371,3 +371,38 @@ fn test_v3_pdu_to_bytes() {
     assert_eq!(pdu2.req_id, 12345);
     assert_eq!(pdu2.version().unwrap(), Version::V3);
 }
+
+#[test]
+fn read_counter64_large_values() {
+    // #36: a Counter64 >= 2^63 is BER-encoded as an unsigned INTEGER with a
+    // leading 0x00 sign octet and so occupies 9 octets. The old signed decoder
+    // rejected 9 octets as AsnIntOverflow, which silently dropped the varbind
+    // (and everything after it) from the response.
+    let cases: &[(&[u8], u64)] = &[
+        (&[snmp::TYPE_COUNTER64, 0x01, 0x2a], 42),
+        (
+            &[snmp::TYPE_COUNTER64, 0x09, 0x00, 0x80, 0, 0, 0, 0, 0, 0, 0],
+            1u64 << 63,
+        ),
+        (
+            &[
+                snmp::TYPE_COUNTER64,
+                0x09,
+                0x00,
+                0xff,
+                0xff,
+                0xff,
+                0xff,
+                0xff,
+                0xff,
+                0xff,
+                0xff,
+            ],
+            u64::MAX,
+        ),
+    ];
+    for (bytes, expected) in cases {
+        let mut reader = AsnReader::from_bytes(bytes);
+        assert_eq!(reader.read_snmp_counter64().unwrap(), *expected);
+    }
+}

@@ -231,9 +231,22 @@ impl<'a> AsnReader<'a> {
         self.read_i64_type(snmp::TYPE_TIMETICKS).map(|v| v as u32)
     }
 
-    #[allow(clippy::cast_sign_loss)]
     pub fn read_snmp_counter64(&mut self) -> Result<u64> {
-        self.read_i64_type(snmp::TYPE_COUNTER64).map(|v| v as u64)
+        self.read_u64_type(snmp::TYPE_COUNTER64)
+    }
+
+    fn read_u64_type(&mut self, expected_ident: u8) -> Result<u64> {
+        let ident = self.read_byte()?;
+        if ident != expected_ident {
+            return Err(Error::AsnWrongType);
+        }
+        let val_len = self.read_length()?;
+        if val_len > self.inner.len() {
+            return Err(Error::AsnInvalidLen);
+        }
+        let (val, remaining) = self.inner.split_at(val_len);
+        self.inner = remaining;
+        decode_u64(val)
     }
 
     pub fn read_snmp_opaque(&mut self) -> Result<&'a [u8]> {
@@ -251,6 +264,21 @@ impl<'a> AsnReader<'a> {
     pub fn bytes_left(&self) -> usize {
         self.inner.len()
     }
+}
+
+fn decode_u64(i: &[u8]) -> Result<u64> {
+    // Counter64 is an unsigned INTEGER (0..2^64-1). A value with bit 63 set is
+    // BER-encoded with a leading 0x00 sign octet and so occupies 9 octets, which
+    // the signed decoder rejects as an overflow. Accept up to 8 octets, or 9
+    // octets when the extra leading octet is that 0x00 sign pad.
+    let bytes = match i {
+        [0x00, rest @ ..] if rest.len() == mem::size_of::<u64>() => rest,
+        _ if i.len() <= mem::size_of::<u64>() => i,
+        _ => return Err(Error::AsnIntOverflow),
+    };
+    let mut buf = [0u8; 8];
+    buf[(mem::size_of::<u64>() - bytes.len())..].copy_from_slice(bytes);
+    Ok(u64::from_be_bytes(buf))
 }
 
 fn decode_i64(i: &[u8]) -> Result<i64> {
