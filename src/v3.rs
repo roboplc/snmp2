@@ -478,14 +478,23 @@ impl Security {
         #[cfg(feature = "crypto-openssl")]
         {
             let cipher = openssl::symm::Cipher::des_cbc();
-            let mut encrypted = vec![0; data.len() + cipher.block_size()];
+            // RFC 3414 8.1.1.2: pad value is irrelevant; zero-pad explicitly and
+            // disable the crypter's own (PKCS#7) padding to match other backends.
+            let len = data.len();
+            let pad_len = 8 - (len % 8);
+            let mut padded = Vec::with_capacity(len + pad_len);
+            padded.extend_from_slice(data);
+            padded.resize(padded.len() + pad_len, 0);
+
+            let mut encrypted = vec![0; padded.len()];
             let mut crypter = openssl::symm::Crypter::new(
                 cipher,
                 openssl::symm::Mode::Encrypt,
                 des_key,
                 Some(&iv),
             )?;
-            let mut count = crypter.update(data, &mut encrypted)?;
+            crypter.set_padding(openssl::symm::Padding::None);
+            let mut count = crypter.update(&padded, &mut encrypted)?;
 
             if count < encrypted.len() {
                 count += crypter.finalize(&mut encrypted[count..])?;
@@ -499,12 +508,14 @@ impl Security {
             let mut encryptor = CbcEncryptor::<Des>::new_from_slices(des_key, &iv)
                 .map_err(|e| Error::Crypto(e.to_string()))?;
 
-            // PKCS#7 padding
+            // RFC 3414 8.1.1.2: pad to a multiple of the block size; "the
+            // actual pad value is irrelevant". Use zeros (the common convention,
+            // e.g. pysnmp) rather than PKCS#7 so we interop with zero-padded peers.
             let len = data.len();
             let pad_len = 8 - (len % 8);
             let mut padded = Vec::with_capacity(len + pad_len);
             padded.extend_from_slice(data);
-            padded.extend(std::iter::repeat_n(u8::try_from(pad_len)?, pad_len));
+            padded.resize(padded.len() + pad_len, 0);
 
             for chunk in padded.chunks_mut(8) {
                 let block = cipher::generic_array::GenericArray::from_mut_slice(chunk);
@@ -655,12 +666,15 @@ impl Security {
                 return Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch));
             }
 
-            let crypter = openssl::symm::Crypter::new(
+            let mut crypter = openssl::symm::Crypter::new(
                 cipher,
                 openssl::symm::Mode::Decrypt,
                 des_key,
                 Some(&iv),
             )?;
+            // RFC 3414 8.1.1.3: padding is ignored on decrypt; the ASN.1 reader
+            // discards trailing pad octets via the ScopedPDU SEQUENCE length.
+            crypter.set_padding(openssl::symm::Padding::None);
             self.decrypt_data_to_plain_buf(crypter, block_size, encrypted)
         }
         #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
@@ -681,18 +695,12 @@ impl Security {
                 decryptor.decrypt_block_mut(block);
             }
 
-            if let Some(&pad_len) = self.plain_buf.last() {
-                let pad_len = pad_len as usize;
-                if pad_len > 0 && pad_len <= block_size && pad_len <= self.plain_buf.len() {
-                    let new_len = self.plain_buf.len() - pad_len;
-                    self.plain_buf.truncate(new_len);
-                    Ok(())
-                } else {
-                    Err(Error::Crypto("Invalid padding".into()))
-                }
-            } else {
-                Ok(())
-            }
+            // RFC 3414 8.1.1.3: "when decrypting, the padding is ignored." The
+            // ScopedPDU is a BER SEQUENCE whose declared length gives the real
+            // boundary, so trailing pad octets are left in place and discarded by
+            // the ASN.1 reader. (PKCS#7 unpadding here broke interop with
+            // zero-padded peers such as pysnmp/snmpsim.)
+            Ok(())
         }
     }
 
@@ -1194,7 +1202,15 @@ pub(crate) fn build(
         sec_buf_seq.push_sequence(|buf| {
             buf.push_octet_string(&priv_params); // priv params
             let l0 = buf.len() - priv_params.len();
-            buf.push_octet_string(&vec![0u8; truncation_len]); // auth params
+            // RFC 3414: authenticationParameters is empty when not authenticating
+            // (noAuthNoPriv). Emitting truncation_len zero bytes here made strict
+            // agents reject the message with a Report PDU.
+            let auth_params_len = if security.need_auth() {
+                truncation_len
+            } else {
+                0
+            };
+            buf.push_octet_string(&vec![0u8; auth_params_len]); // auth params
             let l1 = buf.len() - l0;
             buf.push_octet_string(security.username()); // user name
             buf.push_integer(security.engine_time()); // time
