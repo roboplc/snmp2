@@ -14,6 +14,12 @@ use tokio::net::{ToSocketAddrs, UdpSocket, lookup_host};
 use crate::v3;
 
 /// Asynchronous SNMP client
+///
+/// Request IDs are reserved before network I/O, so dropping a request future
+/// does not cause the next request to reuse its ID. A late reply can still be
+/// queued on the socket; the next operation rejects a mismatched ID with
+/// [`Error::RequestIdMismatch`] rather than returning data for another request.
+/// This client does not automatically skip stale replies or retry operations.
 pub struct AsyncSession {
     version: Version,
     socket: UdpSocket,
@@ -194,6 +200,7 @@ impl AsyncSession {
     pub async fn get(&mut self, oid: &Oid<'_>) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
+        self.req_id += Wrapping(1);
         pdu::build_get(
             self.version,
             self.community.as_slice(),
@@ -208,7 +215,6 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_mut(),
         )?;
-        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
     }
@@ -216,6 +222,7 @@ impl AsyncSession {
     pub async fn get_many(&mut self, oids: &[&Oid<'_>]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
+        self.req_id += Wrapping(1);
         pdu::build_get_many(
             self.version,
             self.community.as_slice(),
@@ -230,7 +237,6 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_mut(),
         )?;
-        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
     }
@@ -238,6 +244,7 @@ impl AsyncSession {
     pub async fn getnext(&mut self, oid: &Oid<'_>) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
+        self.req_id += Wrapping(1);
         pdu::build_getnext(
             self.version,
             self.community.as_slice(),
@@ -252,7 +259,6 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_mut(),
         )?;
-        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
     }
@@ -265,6 +271,7 @@ impl AsyncSession {
     ) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
+        self.req_id += Wrapping(1);
         pdu::build_getbulk(
             self.version,
             self.community.as_slice(),
@@ -281,7 +288,6 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_mut(),
         )?;
-        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
     }
@@ -289,6 +295,7 @@ impl AsyncSession {
     pub async fn set(&mut self, values: &[(&Oid<'_>, Value<'_>)]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
+        self.req_id += Wrapping(1);
         pdu::build_set(
             self.version,
             self.community.as_slice(),
@@ -303,8 +310,116 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_mut(),
         )?;
-        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[derive(Clone, Copy, Debug)]
+    enum Operation {
+        Get,
+        GetMany,
+        GetNext,
+        GetBulk,
+        Set,
+    }
+
+    async fn invoke<'a>(
+        session: &'a mut AsyncSession,
+        op: Operation,
+        oid: &Oid<'_>,
+    ) -> Result<Pdu<'a>> {
+        match op {
+            Operation::Get => session.get(oid).await,
+            Operation::GetMany => session.get_many(&[oid]).await,
+            Operation::GetNext => session.getnext(oid).await,
+            Operation::GetBulk => session.getbulk(&[oid], 0, 1).await,
+            Operation::Set => session.set(&[(oid, Value::Integer(1))]).await,
+        }
+    }
+
+    async fn reply(agent: &UdpSocket, expected_id: i32, reply_id: i32, oid: &Oid<'_>) {
+        let mut packet = [0; 2048];
+        let (n, peer) = agent.recv_from(&mut packet).await.unwrap();
+        assert_eq!(Pdu::from_bytes(&packet[..n]).unwrap().req_id, expected_id);
+        let mut response = pdu::Buf::default();
+        pdu::build(
+            Version::V2C,
+            b"public",
+            crate::snmp::MSG_RESPONSE,
+            reply_id,
+            &[(oid, Value::Integer(42))],
+            0,
+            0,
+            &mut response,
+            #[cfg(feature = "v3")]
+            None,
+        )
+        .unwrap();
+        agent.send_to(&response, peer).await.unwrap();
+    }
+
+    #[test]
+    fn cancellation_consumes_ids_and_rejects_late_replies() {
+        // The default buffers are large stack arrays. Allow the nested test futures
+        // enough stack without changing the library's buffer feature configuration.
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(exercise_cancellation());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    async fn exercise_cancellation() {
+        // Bound the entire test, not the timing of individual UDP packets.
+        Box::pin(tokio::time::timeout(Duration::from_secs(5), async {
+            for op in [Operation::Get, Operation::GetMany, Operation::GetNext,
+                Operation::GetBulk, Operation::Set] {
+                let agent = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+                let mut session = AsyncSession::new_v2c(
+                    agent.local_addr().unwrap(), b"public", i32::MAX,
+                ).await.unwrap();
+                let first_oid = Oid::from(&[1,3,6,1,2,1,1,1,0]).unwrap();
+                let second_oid = Oid::from(&[1,3,6,1,2,1,1,2,0]).unwrap();
+                let mut packet = [0; 2048];
+                let mut abandoned = Box::pin(invoke(&mut session, op, &first_oid));
+                tokio::select! {
+                    result = &mut abandoned => panic!("request completed without a response: {result:?}"),
+                    received = agent.recv_from(&mut packet) => {
+                        let (n, _) = received.unwrap();
+                        assert_eq!(Pdu::from_bytes(&packet[..n]).unwrap().req_id, i32::MAX);
+                    }
+                }
+                // Exactly what dropping a timeout's inner future does.
+                drop(abandoned);
+                assert_eq!(session.req_id.0, i32::MIN, "{op:?}");
+
+                let (result, ()) = tokio::join!(
+                    invoke(&mut session, op, &second_oid),
+                    reply(&agent, i32::MIN, i32::MAX, &first_oid),
+                );
+                assert!(matches!(result, Err(Error::RequestIdMismatch)), "{op:?}");
+
+                // A rejected stale packet also consumes its request ID.
+                let (result, ()) = tokio::join!(
+                    invoke(&mut session, op, &second_oid),
+                    reply(&agent, i32::MIN + 1, i32::MIN + 1, &second_oid),
+                );
+                let response = result.unwrap();
+                assert_eq!(response.req_id, i32::MIN + 1);
+            }
+        })).await.expect("local UDP regression test timed out");
     }
 }

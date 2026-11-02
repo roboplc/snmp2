@@ -34,7 +34,7 @@ cfb-mode = { version = "0.8", optional = true }
 rand = { version = "0.9", optional = true }
 
 [dev-dependencies]
-tokio = { version = "1" }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 [features]
 default = ["tokio", "crypto-rust"]
