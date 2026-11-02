@@ -267,6 +267,9 @@ impl<'a> AsnReader<'a> {
 }
 
 fn decode_u64(i: &[u8]) -> Result<u64> {
+    if i.is_empty() {
+        return Err(Error::AsnInvalidLen);
+    }
     // Counter64 is an unsigned INTEGER (0..2^64-1). A value with bit 63 set is
     // BER-encoded with a leading 0x00 sign octet and so occupies 9 octets, which
     // the signed decoder rejects as an overflow. Accept up to 8 octets, or 9
@@ -282,6 +285,9 @@ fn decode_u64(i: &[u8]) -> Result<u64> {
 }
 
 fn decode_i64(i: &[u8]) -> Result<i64> {
+    if i.is_empty() {
+        return Err(Error::AsnInvalidLen);
+    }
     if i.len() > mem::size_of::<i64>() {
         return Err(Error::AsnIntOverflow);
     }

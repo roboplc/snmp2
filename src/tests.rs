@@ -1,4 +1,4 @@
-use crate::{MessageType, Pdu, Value};
+use crate::{MessageType, Pdu, Value, asn1};
 
 use super::{AsnReader, Error, Varbinds, Version};
 use super::{Oid, pdu, snmp};
@@ -405,4 +405,35 @@ fn read_counter64_large_values() {
         let mut reader = AsnReader::from_bytes(bytes);
         assert_eq!(reader.read_snmp_counter64().unwrap(), *expected);
     }
+}
+
+#[test]
+fn empty_integers_are_rejected() {
+    assert!(matches!(
+        AsnReader::from_bytes(&[asn1::TYPE_INTEGER, 0]).read_asn_integer(),
+        Err(Error::AsnInvalidLen)
+    ));
+    assert!(matches!(
+        AsnReader::from_bytes(&[snmp::TYPE_COUNTER64, 0]).read_snmp_counter64(),
+        Err(Error::AsnInvalidLen)
+    ));
+    for (bytes, expected) in [
+        ([asn1::TYPE_INTEGER, 1, 0], 0),
+        ([asn1::TYPE_INTEGER, 1, 0xff], -1),
+        ([asn1::TYPE_INTEGER, 1, 0x80], -128),
+    ] {
+        assert_eq!(
+            AsnReader::from_bytes(&bytes).read_asn_integer().unwrap(),
+            expected
+        );
+    }
+    let malformed = [
+        0x30, 0x27, 0x02, 0x00, 0x01, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63, 0xa2, 0x1a,
+        0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x0f, 0x30, 0x0d, 0x06, 0x08,
+        0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x03, 0x00, 0x02, 0x01, 0x01,
+    ];
+    assert!(matches!(
+        Pdu::from_bytes(&malformed),
+        Err(Error::AsnInvalidLen)
+    ));
 }
