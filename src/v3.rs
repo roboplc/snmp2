@@ -478,14 +478,23 @@ impl Security {
         #[cfg(feature = "crypto-openssl")]
         {
             let cipher = openssl::symm::Cipher::des_cbc();
-            let mut encrypted = vec![0; data.len() + cipher.block_size()];
+            // RFC 3414 8.1.1.2: pad value is irrelevant; zero-pad explicitly and
+            // disable the crypter's own (PKCS#7) padding to match other backends.
+            let len = data.len();
+            let pad_len = (8 - (len % 8)) % 8;
+            let mut padded = Vec::with_capacity(len + pad_len);
+            padded.extend_from_slice(data);
+            padded.resize(padded.len() + pad_len, 0);
+
+            let mut encrypted = vec![0; padded.len() + cipher.block_size()];
             let mut crypter = openssl::symm::Crypter::new(
                 cipher,
                 openssl::symm::Mode::Encrypt,
                 des_key,
                 Some(&iv),
             )?;
-            let mut count = crypter.update(data, &mut encrypted)?;
+            crypter.pad(false);
+            let mut count = crypter.update(&padded, &mut encrypted)?;
 
             if count < encrypted.len() {
                 count += crypter.finalize(&mut encrypted[count..])?;
@@ -499,12 +508,14 @@ impl Security {
             let mut encryptor = CbcEncryptor::<Des>::new_from_slices(des_key, &iv)
                 .map_err(|e| Error::Crypto(e.to_string()))?;
 
-            // PKCS#7 padding
+            // RFC 3414 8.1.1.2: pad to a multiple of the block size; "the
+            // actual pad value is irrelevant". Use zeros (the common convention,
+            // e.g. pysnmp) rather than PKCS#7 so we interop with zero-padded peers.
             let len = data.len();
-            let pad_len = 8 - (len % 8);
+            let pad_len = (8 - (len % 8)) % 8;
             let mut padded = Vec::with_capacity(len + pad_len);
             padded.extend_from_slice(data);
-            padded.extend(std::iter::repeat_n(u8::try_from(pad_len)?, pad_len));
+            padded.resize(padded.len() + pad_len, 0);
 
             for chunk in padded.chunks_mut(8) {
                 let block = cipher::generic_array::GenericArray::from_mut_slice(chunk);
@@ -655,12 +666,15 @@ impl Security {
                 return Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch));
             }
 
-            let crypter = openssl::symm::Crypter::new(
+            let mut crypter = openssl::symm::Crypter::new(
                 cipher,
                 openssl::symm::Mode::Decrypt,
                 des_key,
                 Some(&iv),
             )?;
+            // RFC 3414 8.1.1.3: padding is ignored on decrypt; the ASN.1 reader
+            // discards trailing pad octets via the ScopedPDU SEQUENCE length.
+            crypter.pad(false);
             self.decrypt_data_to_plain_buf(crypter, block_size, encrypted)
         }
         #[cfg(all(feature = "crypto-rust", not(feature = "crypto-openssl")))]
@@ -681,6 +695,11 @@ impl Security {
                 decryptor.decrypt_block_mut(block);
             }
 
+            // RFC 3414 8.1.1.3: "when decrypting, the padding is ignored." The
+            // ScopedPDU is a BER SEQUENCE whose declared length gives the real
+            // boundary, so trailing pad octets are left in place and discarded by
+            // the ASN.1 reader. (PKCS#7 unpadding here broke interop with
+            // zero-padded peers such as pysnmp/snmpsim.)
             Ok(())
         }
     }
@@ -1183,7 +1202,15 @@ pub(crate) fn build(
         sec_buf_seq.push_sequence(|buf| {
             buf.push_octet_string(&priv_params); // priv params
             let l0 = buf.len() - priv_params.len();
-            buf.push_octet_string(&vec![0u8; truncation_len]); // auth params
+            // RFC 3414: authenticationParameters is empty when not authenticating
+            // (noAuthNoPriv). Emitting truncation_len zero bytes here made strict
+            // agents reject the message with a Report PDU.
+            let auth_params_len = if security.need_auth() {
+                truncation_len
+            } else {
+                0
+            };
+            buf.push_octet_string(&vec![0u8; auth_params_len]); // auth params
             let l1 = buf.len() - l0;
             buf.push_octet_string(security.username()); // user name
             buf.push_integer(security.engine_time()); // time
@@ -1205,14 +1232,97 @@ pub(crate) fn build(
     });
 
     auth_pos += buf.len() - inner_len;
-    if (auth_pos + truncation_len) > buf.len() {
-        return Err(Error::ValueOutOfRange);
-    }
-
     if security.need_auth() {
+        if (auth_pos + truncation_len) > buf.len() {
+            return Err(Error::ValueOutOfRange);
+        }
         let hmac = security.calculate_hmac(buf)?;
         buf[auth_pos..auth_pos + truncation_len].copy_from_slice(&hmac[..truncation_len]);
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+
+    fn des_security() -> Security {
+        let mut security = Security::new(b"test-user", b"");
+        // Synthetic localized key: DES key followed by the pre-IV.
+        security.authoritative_state.priv_key = (1_u8..=16).collect();
+        security
+    }
+
+    // OpenSSL 3 requires the legacy provider for DES. Run that backend with
+    // OPENSSL_CONF=tests/openssl-legacy.cnf; this does not alter production config.
+    #[test]
+    fn des_zero_padding_roundtrip() {
+        for len in [0_usize, 1, 7, 8, 9, 15, 16, 17] {
+            let plain = vec![0x42; len];
+            let mut security = des_security();
+            let (encrypted, salt) = security.encrypt_des(&plain).unwrap();
+            let padded_len = len.div_ceil(8) * 8;
+            assert_eq!(encrypted.len(), padded_len);
+            security.decrypt_des(&encrypted, &salt).unwrap();
+            assert_eq!(&security.plain_buf[..len], plain);
+            assert_eq!(security.plain_buf.len(), padded_len);
+            assert!(security.plain_buf[len..].iter().all(|&b| b == 0));
+        }
+    }
+
+    #[test]
+    fn des_preserves_aligned_payload_tail() {
+        // Values 1..=8 at the end are data, not a PKCS#7 pad count.
+        for tail in 1_u8..=8 {
+            let mut plain = [0x42; 8];
+            plain[7] = tail;
+            let mut security = des_security();
+            let (encrypted, salt) = security.encrypt_des(&plain).unwrap();
+            assert_eq!(encrypted.len(), 8);
+            security.decrypt_des(&encrypted, &salt).unwrap();
+            assert_eq!(security.plain_buf, plain);
+        }
+    }
+
+    #[test]
+    fn des_rejects_incomplete_block() {
+        let mut security = des_security();
+        assert!(matches!(
+            security.decrypt_des(&[0; 7], &[0; 8]),
+            Err(Error::AuthFailure(AuthErrorKind::PayloadLengthMismatch))
+        ));
+    }
+
+    #[test]
+    fn no_auth_parameters_are_empty() {
+        for protocol in [
+            AuthProtocol::Md5,
+            AuthProtocol::Sha1,
+            AuthProtocol::Sha224,
+            AuthProtocol::Sha256,
+            AuthProtocol::Sha384,
+            AuthProtocol::Sha512,
+        ] {
+            let security = Security::new(b"test-user", b"")
+                .with_auth(Auth::NoAuthNoPriv)
+                .with_auth_protocol(protocol);
+            let mut buf = Buf::default();
+            let oid = Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap();
+            pdu::build_get(Version::V3, b"", 1, &oid, &mut buf, Some(&security)).unwrap();
+            let mut outer = AsnReader::from_bytes(&buf);
+            let mut message = AsnReader::from_bytes(outer.read_raw(asn1::TYPE_SEQUENCE).unwrap());
+            assert_eq!(message.read_asn_integer().unwrap(), 3);
+            message.read_raw(asn1::TYPE_SEQUENCE).unwrap(); // header
+            let sec_bytes = message.read_asn_octetstring().unwrap();
+            let mut sec_outer = AsnReader::from_bytes(sec_bytes);
+            let mut usm = AsnReader::from_bytes(sec_outer.read_raw(asn1::TYPE_SEQUENCE).unwrap());
+            usm.read_asn_octetstring().unwrap(); // engine ID
+            usm.read_asn_integer().unwrap(); // boots
+            usm.read_asn_integer().unwrap(); // time
+            assert_eq!(usm.read_asn_octetstring().unwrap(), b"test-user");
+            assert_eq!(usm.read_asn_octetstring().unwrap(), b""); // auth parameters
+            assert_eq!(usm.read_asn_octetstring().unwrap(), b""); // privacy parameters
+        }
+    }
 }
