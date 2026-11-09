@@ -264,6 +264,7 @@ pub struct Security {
     pub(crate) authoritative_state: AuthoritativeState,
     pub(crate) plain_buf: Vec<u8>,
     pub(crate) context_name: Vec<u8>,
+    pub(crate) msg_id: std::num::Wrapping<i32>,
 }
 
 impl Security {
@@ -277,6 +278,7 @@ impl Security {
             authoritative_state: AuthoritativeState::default(),
             plain_buf: Vec::new(),
             context_name: Vec::new(),
+            msg_id: std::num::Wrapping(crate::random_positive_i32()),
         }
     }
 
@@ -429,6 +431,15 @@ impl Security {
 
     pub fn username(&self) -> &[u8] {
         &self.username
+    }
+
+    /// Returns the next msgID to use and increments the counter.
+    /// Each call consumes one msgID; the value is monotonically
+    /// increasing (wrapping within 0‥2 147 483 647) per RFC 3412 § 6.2.
+    pub(crate) fn next_msg_id(&mut self) -> i32 {
+        let id = self.msg_id.0;
+        self.msg_id = std::num::Wrapping((id + 1) & i32::MAX);
+        id
     }
 
     /// corrects authoritative state engine time using local monotonic time
@@ -1116,7 +1127,7 @@ impl<'a> Pdu<'a> {
     }
 }
 
-pub(crate) fn build_init(req_id: i32, buf: &mut Buf) {
+pub(crate) fn build_init(req_id: i32, msg_id: i32, buf: &mut Buf) {
     buf.reset();
     let mut sec_buf = Buf::default();
     sec_buf.push_sequence(|sec| {
@@ -1143,7 +1154,7 @@ pub(crate) fn build_init(req_id: i32, buf: &mut Buf) {
             global.push_integer(3); // security_model
             global.push_octet_string(&[V3_MSG_FLAGS_REPORTABLE]); // flags
             global.push_integer(BUFFER_SIZE.try_into().unwrap()); // max_size
-            global.push_integer(req_id.into()); // msg_id
+            global.push_integer(msg_id.into()); // msg_id
         });
         message.push_integer(Version::V3 as i64);
     });
@@ -1156,7 +1167,7 @@ pub(crate) fn build(
     non_repeaters: u32,
     max_repetitions: u32,
     buf: &mut Buf,
-    security: Option<&Security>,
+    security: Option<&mut Security>,
 ) -> Result<()> {
     let security = security.ok_or(Error::AuthFailure(AuthErrorKind::SecurityNotProvided))?;
     let truncation_len = security.auth_protocol.truncation_length();
@@ -1187,6 +1198,8 @@ pub(crate) fn build(
     } else {
         None
     };
+
+    let msg_id = security.next_msg_id();
 
     buf.push_sequence(|buf| {
         if let Some(ref encrypted) = encrypted {
@@ -1224,7 +1237,7 @@ pub(crate) fn build(
             buf.push_integer(3); // security_model
             buf.push_octet_string(&[flags]); // flags
             buf.push_integer(BUFFER_SIZE.try_into().unwrap()); // max_size
-            buf.push_integer(req_id.into()); // msg_id
+            buf.push_integer(msg_id.into()); // msg_id
         });
         buf.push_integer(3); // version
         auth_pos = buf.len() - l0 - (sec_buf_len - auth_pos);
@@ -1304,12 +1317,12 @@ mod regression_tests {
             AuthProtocol::Sha384,
             AuthProtocol::Sha512,
         ] {
-            let security = Security::new(b"test-user", b"")
+            let mut security = Security::new(b"test-user", b"")
                 .with_auth(Auth::NoAuthNoPriv)
                 .with_auth_protocol(protocol);
             let mut buf = Buf::default();
             let oid = Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap();
-            pdu::build_get(Version::V3, b"", 1, &oid, &mut buf, Some(&security)).unwrap();
+            pdu::build_get(Version::V3, b"", 1, &oid, &mut buf, Some(&mut security)).unwrap();
             let mut outer = AsnReader::from_bytes(&buf);
             let mut message = AsnReader::from_bytes(outer.read_raw(asn1::TYPE_SEQUENCE).unwrap());
             assert_eq!(message.read_asn_integer().unwrap(), 3);

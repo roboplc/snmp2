@@ -317,7 +317,7 @@ pub(crate) fn build(
     non_repeaters: u32,
     max_repetitions: u32,
     buf: &mut Buf,
-    #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3")] security: Option<&mut v3::Security>,
 ) -> Result<()> {
     #[cfg(feature = "v3")]
     if version == Version::V3 {
@@ -392,7 +392,7 @@ pub(crate) fn build_get(
     req_id: i32,
     oid: &Oid,
     buf: &mut Buf,
-    #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3")] security: Option<&mut v3::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -414,7 +414,7 @@ pub(crate) fn build_get_many(
     req_id: i32,
     oids: &[&Oid],
     buf: &mut Buf,
-    #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3")] security: Option<&mut v3::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -439,7 +439,7 @@ pub(crate) fn build_getnext(
     req_id: i32,
     oid: &Oid,
     buf: &mut Buf,
-    #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3")] security: Option<&mut v3::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -464,7 +464,7 @@ pub(crate) fn build_getbulk(
     non_repeaters: u32,
     max_repetitions: u32,
     buf: &mut Buf,
-    #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3")] security: Option<&mut v3::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -489,7 +489,7 @@ pub(crate) fn build_set(
     req_id: i32,
     values: &[(&Oid, Value)],
     buf: &mut Buf,
-    #[cfg(feature = "v3")] security: Option<&v3::Security>,
+    #[cfg(feature = "v3")] security: Option<&mut v3::Security>,
 ) -> Result<()> {
     build(
         version,
@@ -670,7 +670,7 @@ impl<'a> Pdu<'a> {
     }
 
     #[cfg(feature = "v3")]
-    pub fn to_bytes_with_security(&self, security: Option<&v3::Security>) -> Result<Vec<u8>> {
+    pub fn to_bytes_with_security(&self, security: Option<&mut v3::Security>) -> Result<Vec<u8>> {
         if self.version == Version::V3 as i64 {
             let mut buf = Buf::default();
             let ident = match self.message_type {

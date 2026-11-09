@@ -159,7 +159,8 @@ impl SyncSession {
             security.reset_engine_counters();
             // send a request to get the engine id
             let req_id = self.req_id.0;
-            v3::build_init(req_id, &mut self.send_pdu);
+            let msg_id = security.next_msg_id();
+            v3::build_init(req_id, msg_id, &mut self.send_pdu);
             self.req_id += Wrapping(1);
             if let Err(e) = Pdu::from_bytes_inner(
                 Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
@@ -217,7 +218,7 @@ impl SyncSession {
             oid,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
@@ -239,7 +240,7 @@ impl SyncSession {
             oids,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
@@ -261,7 +262,7 @@ impl SyncSession {
             oid,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
@@ -290,7 +291,7 @@ impl SyncSession {
             max_repetitions,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
@@ -312,7 +313,7 @@ impl SyncSession {
             values,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
         let resp = Pdu::from_bytes_inner(
             Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
