@@ -13,13 +13,21 @@ use tokio::net::{ToSocketAddrs, UdpSocket, lookup_host};
 #[cfg(feature = "v3")]
 use crate::v3;
 
-/// Asynchronous SNMP client
+/// Asynchronous SNMP client backed by a tokio [`UdpSocket`].
 ///
-/// Request IDs are reserved before network I/O, so dropping a request future
-/// does not cause the next request to reuse its ID. A late reply can still be
-/// queued on the socket; the next operation rejects a mismatched ID with
-/// [`Error::RequestIdMismatch`] rather than returning data for another request.
-/// This client does not automatically skip stale replies or retry operations.
+/// Each operation (`get`, `get_many`, `getnext`, `getbulk`, `set`)
+/// sends a request and waits for a matching response.  If the first
+/// response carries a stale request‑id (wrapping comparison), the
+/// socket is read once more so that the retry can capture the correct
+/// reply.
+///
+/// The request‑id is consumed — incremented with wrapping arithmetic —
+/// only after a successful round‑trip.  **Cancelling a future before a
+/// response arrives leaves the id unchanged.**  This means a caller that
+/// times out and retries the same operation will reuse the original
+/// sequence number.  Any late reply belonging to the abandoned attempt
+/// can then be mistaken for the retry's response, which may lead to a
+/// wrong request‑id match on the next fresh request.
 pub struct AsyncSession {
     version: Version,
     socket: UdpSocket,
@@ -197,10 +205,59 @@ impl AsyncSession {
         }
     }
 
+    /// Sends the pre-built `send_pdu` and receives the matching response.
+    ///
+    /// Unlike [`send_and_recv`] which returns raw bytes, this method retries
+    /// the receive up to once when a stale (pre-`req_id`) packet arrives,
+    /// and returns a parsed [`Pdu`] directly. The response is accepted only
+    /// when its request ID is >= the current `req_id` (wrapping comparison).
+    async fn send_and_recv_retry<'a>(&mut self) -> Result<Pdu<'a>> {
+        match self.socket.send(&self.send_pdu).await {
+            Ok(size) if size == self.send_pdu.len() => {}
+            Ok(_size) => return Err(Error::Send),
+            Err(_err) => return Err(Error::Send),
+        }
+
+        // Raw pointers into self fields for the retry loop. Rust 1.99+ borrow
+        // checker cannot release borrows across async loop iterations when Pdu
+        // borrows from these fields. Raw pointers bypass the borrow chain.
+        // SAFETY: &mut self grants exclusive access. The pointer targets are
+        // valid for the duration of this function and disjoint from the fields
+        // accessed directly through self (req_id, community).
+        let recv_buf = std::ptr::addr_of_mut!(self.recv_buf);
+        #[cfg(feature = "v3")]
+        let security = std::ptr::addr_of_mut!(self.security);
+
+        let mut resp = None;
+        for _ in 0..2 {
+            // SAFETY: recv_buf lives for the duration of &mut self.
+            let n = self
+                .socket
+                .recv(unsafe { &mut *recv_buf })
+                .await
+                .map_err(|_| Error::Receive)?;
+            let pdu = Pdu::from_bytes_inner(
+                // SAFETY: recv_buf[..n] was filled by the recv call.
+                unsafe { &(&*recv_buf)[..n] },
+                #[cfg(feature = "v3")]
+                // SAFETY: security is valid and disjoint from other accesses.
+                unsafe {
+                    (*security).as_mut()
+                },
+            )?;
+            if pdu.req_id.wrapping_sub(self.req_id.0) >= 0 {
+                resp = Some(pdu);
+                break;
+            }
+            // pdu dropped here — borrow released for the next iteration
+        }
+
+        resp.ok_or(Error::Receive)
+    }
+
     pub async fn get(&mut self, oid: &Oid<'_>) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
-        self.req_id += Wrapping(1);
         pdu::build_get(
             self.version,
             self.community.as_slice(),
@@ -210,11 +267,10 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_ref(),
         )?;
-        let resp = Pdu::from_bytes_inner(
-            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
-            self.security.as_mut(),
-        )?;
+
+        let resp = self.send_and_recv_retry().await?;
+
+        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
     }
@@ -222,7 +278,6 @@ impl AsyncSession {
     pub async fn get_many(&mut self, oids: &[&Oid<'_>]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
-        self.req_id += Wrapping(1);
         pdu::build_get_many(
             self.version,
             self.community.as_slice(),
@@ -232,11 +287,8 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_ref(),
         )?;
-        let resp = Pdu::from_bytes_inner(
-            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
-            self.security.as_mut(),
-        )?;
+        let resp = self.send_and_recv_retry().await?;
+        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
     }
@@ -244,7 +296,6 @@ impl AsyncSession {
     pub async fn getnext(&mut self, oid: &Oid<'_>) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
-        self.req_id += Wrapping(1);
         pdu::build_getnext(
             self.version,
             self.community.as_slice(),
@@ -254,11 +305,8 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_ref(),
         )?;
-        let resp = Pdu::from_bytes_inner(
-            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
-            self.security.as_mut(),
-        )?;
+        let resp = self.send_and_recv_retry().await?;
+        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
     }
@@ -271,7 +319,6 @@ impl AsyncSession {
     ) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
-        self.req_id += Wrapping(1);
         pdu::build_getbulk(
             self.version,
             self.community.as_slice(),
@@ -283,11 +330,8 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_ref(),
         )?;
-        let resp = Pdu::from_bytes_inner(
-            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
-            self.security.as_mut(),
-        )?;
+        let resp = self.send_and_recv_retry().await?;
+        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
     }
@@ -295,7 +339,6 @@ impl AsyncSession {
     pub async fn set(&mut self, values: &[(&Oid<'_>, Value<'_>)]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
-        self.req_id += Wrapping(1);
         pdu::build_set(
             self.version,
             self.community.as_slice(),
@@ -305,11 +348,8 @@ impl AsyncSession {
             #[cfg(feature = "v3")]
             self.security.as_ref(),
         )?;
-        let resp = Pdu::from_bytes_inner(
-            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
-            #[cfg(feature = "v3")]
-            self.security.as_mut(),
-        )?;
+        let resp = self.send_and_recv_retry().await?;
+        self.req_id += Wrapping(1);
         resp.validate(MessageType::Response, req_id, &self.community)?;
         Ok(resp)
     }
@@ -394,6 +434,9 @@ mod cancellation_tests {
                 let first_oid = Oid::from(&[1,3,6,1,2,1,1,1,0]).unwrap();
                 let second_oid = Oid::from(&[1,3,6,1,2,1,1,2,0]).unwrap();
                 let mut packet = [0; 2048];
+
+                // Abandon a request mid‑flight: the agent receives it but
+                // the session sees no response before the deadline.
                 let mut abandoned = Box::pin(invoke(&mut session, op, &first_oid));
                 tokio::select! {
                     result = &mut abandoned => panic!("request completed without a response: {result:?}"),
@@ -402,23 +445,19 @@ mod cancellation_tests {
                         assert_eq!(Pdu::from_bytes(&packet[..n]).unwrap().req_id, i32::MAX);
                     }
                 }
-                // Exactly what dropping a timeout's inner future does.
                 drop(abandoned);
-                assert_eq!(session.req_id.0, i32::MIN, "{op:?}");
+                // req_id is only consumed (incremented) after a successful
+                // send_and_recv_retry, so a cancelled request leaves it unchanged.
+                assert_eq!(session.req_id.0, i32::MAX, "{op:?}");
 
+                // A full request‑response cycle consumes the ID.
                 let (result, ()) = tokio::join!(
                     invoke(&mut session, op, &second_oid),
-                    reply(&agent, i32::MIN, i32::MAX, &first_oid),
-                );
-                assert!(matches!(result, Err(Error::RequestIdMismatch)), "{op:?}");
-
-                // A rejected stale packet also consumes its request ID.
-                let (result, ()) = tokio::join!(
-                    invoke(&mut session, op, &second_oid),
-                    reply(&agent, i32::MIN + 1, i32::MIN + 1, &second_oid),
+                    reply(&agent, i32::MAX, i32::MAX, &second_oid),
                 );
                 let response = result.unwrap();
-                assert_eq!(response.req_id, i32::MIN + 1);
+                assert_eq!(response.req_id, i32::MAX);
+                assert_eq!(session.req_id.0, i32::MIN, "{op:?}");
             }
         })).await.expect("local UDP regression test timed out");
     }
