@@ -167,6 +167,17 @@ type Result<T> = std::result::Result<T, Error>;
 
 const BUFFER_SIZE: usize = 65_507;
 
+/// A pseudo-random positive `i32` (0‥2 147 483 647) derived from the
+/// current time and process ID.  Suitable for initialising `req_id` or
+/// `msg_id` so that successive runs do not reuse the same values.
+pub fn random_positive_i32() -> i32 {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let pid = std::process::id();
+    ((t.as_nanos() ^ pid as u128) as i32) & i32::MAX
+}
+
 pub enum Value<'a> {
     Boolean(bool),
     Null,

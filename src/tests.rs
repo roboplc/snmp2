@@ -326,7 +326,7 @@ fn test_v3_pdu_to_bytes() {
     use crate::v3;
 
     let mut buf = pdu::Buf::default();
-    let security = v3::Security::new(b"public", b"secure")
+    let mut security = v3::Security::new(b"public", b"secure")
         .with_auth_protocol(v3::AuthProtocol::Sha1)
         .with_auth(v3::Auth::AuthPriv {
             cipher: v3::Cipher::Aes128,
@@ -343,7 +343,7 @@ fn test_v3_pdu_to_bytes() {
         12345,
         &Oid::from(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
         &mut buf,
-        Some(&security),
+        Some(&mut security),
     )
     .unwrap();
 
@@ -358,7 +358,7 @@ fn test_v3_pdu_to_bytes() {
     assert_eq!(pdu.version().unwrap(), Version::V3);
 
     // Convert back to bytes using the new method
-    let bytes = pdu.to_bytes_with_security(Some(&security)).unwrap();
+    let bytes = pdu.to_bytes_with_security(Some(&mut security)).unwrap();
 
     println!("Re-encoded bytes: {:?}", bytes);
 

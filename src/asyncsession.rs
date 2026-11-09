@@ -17,17 +17,25 @@ use crate::v3;
 ///
 /// Each operation (`get`, `get_many`, `getnext`, `getbulk`, `set`)
 /// sends a request and waits for a matching response.  If the first
-/// response carries a stale request‑id (wrapping comparison), the
-/// socket is read once more so that the retry can capture the correct
-/// reply.
+/// response carries a stale request-id (wrapping comparison), the
+/// socket is read again (up to 3 attempts) so that the retry can
+/// capture the correct reply.
 ///
-/// The request‑id is consumed — incremented with wrapping arithmetic —
-/// only after a successful round‑trip.  **Cancelling a future before a
-/// response arrives leaves the id unchanged.**  This means a caller that
-/// times out and retries the same operation will reuse the original
-/// sequence number.  Any late reply belonging to the abandoned attempt
-/// can then be mistaken for the retry's response, which may lead to a
-/// wrong request‑id match on the next fresh request.
+/// ## Request ID (`req_id`)
+///
+/// * A wrapping `i32` counter set by the caller via `starting_req_id`.
+/// * Incremented **only** after a successful round-trip.
+/// * Cancelling a future leaves the id unchanged — the caller can
+///   retry the same request with the original `req_id`.
+/// * Response matching relies solely on this field: a received PDU is
+///   accepted when `pdu.req_id.wrapping_sub(self.req_id.0) >= 0`.
+///
+/// ## v3 Message ID (`msg_id`)
+///
+/// * An internal counter inside [`v3::Security`], randomly initialised
+///   and incremented on every `build()` call (see RFC 3414 § 4).
+/// * Provides packet uniqueness across the session lifetime; **not**
+///   used for response matching or stale-packet filtering.
 pub struct AsyncSession {
     version: Version,
     socket: UdpSocket,
@@ -142,7 +150,8 @@ impl AsyncSession {
             security.reset_engine_counters();
             // send a request to get the engine id
             let req_id = self.req_id.0;
-            v3::build_init(req_id, &mut self.send_pdu);
+            let msg_id = security.next_msg_id();
+            v3::build_init(req_id, msg_id, &mut self.send_pdu);
             self.req_id += Wrapping(1);
             if let Err(e) = Pdu::from_bytes_inner(
                 Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf).await?,
@@ -279,7 +288,7 @@ impl AsyncSession {
             oid,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
 
         let resp = self.send_and_recv_retry(None).await?;
@@ -299,7 +308,7 @@ impl AsyncSession {
             oids,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
         let resp = self.send_and_recv_retry(None).await?;
         self.req_id += Wrapping(1);
@@ -317,7 +326,7 @@ impl AsyncSession {
             oid,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
         let resp = self.send_and_recv_retry(None).await?;
         self.req_id += Wrapping(1);
@@ -342,7 +351,7 @@ impl AsyncSession {
             max_repetitions,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
         let resp = self.send_and_recv_retry(None).await?;
         self.req_id += Wrapping(1);
@@ -360,7 +369,7 @@ impl AsyncSession {
             values,
             &mut self.send_pdu,
             #[cfg(feature = "v3")]
-            self.security.as_ref(),
+            self.security.as_mut(),
         )?;
         let resp = self.send_and_recv_retry(None).await?;
         self.req_id += Wrapping(1);
