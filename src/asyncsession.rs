@@ -216,7 +216,7 @@ impl AsyncSession {
     /// the receive up to once when a stale (pre-`req_id`) packet arrives,
     /// and returns a parsed [`Pdu`] directly. The response is accepted only
     /// when its request ID is >= the current `req_id` (wrapping comparison).
-    async fn send_and_recv_retry<'a>(&'a mut self, retries: Option<usize>) -> Result<Pdu<'a>> {
+    async fn send_and_recv_retry<'a>(&mut self, retries: Option<usize>) -> Result<Pdu<'a>> {
         let max_retries = retries.unwrap_or(3);
         match self.socket.send(&self.send_pdu).await {
             Ok(size) if size == self.send_pdu.len() => {}
@@ -224,31 +224,37 @@ impl AsyncSession {
             Err(_err) => return Err(Error::Send),
         }
 
-        // Raw pointers into self fields for the retry loop.  Because
-        // `Pdu<'a>` borrows from `self.recv_buf`, the borrow checker ties
-        // the returned lifetime to `&mut self`.  That prevents a second
-        // `recv` on `self.recv_buf` on the fall-through path even after
-        // the first `Pdu` is dropped.  Raw pointers bypass the borrow
-        // chain while still being sound — `&mut self` guarantees exclusive
-        // access and the pointer targets are disjoint from the fields
-        // accessed directly through `self` (req_id, community).
-        let recv_buf = std::ptr::addr_of_mut!(self.recv_buf);
-        #[cfg(feature = "v3")]
-        let security = std::ptr::addr_of_mut!(self.security);
+        // The retry loop creates raw pointers *inside* the loop body, after
+        // each `.await`, so they are never live across a suspension point.
+        // This keeps the generated future `Send`, unlike the previous
+        // version where pointers were declared before the loop.
+        //
+        // Raw pointers are still necessary here because `Pdu<'a>` borrows
+        // from `self.recv_buf`.  Without them the borrow checker ties the
+        // returned lifetime to `&mut self`, preventing a second `recv` on
+        // `self.recv_buf` in the next iteration even after the previous
+        // `Pdu` is dropped.
 
         let mut resp = None;
         for _ in 0..max_retries {
-            // SAFETY: recv_buf lives for the duration of &mut self.
             let n = self
                 .socket
-                .recv(unsafe { &mut *recv_buf })
+                .recv(&mut self.recv_buf)
                 .await
                 .map_err(|_| Error::Receive)?;
+
+            // SAFETY: these pointers are derived from `&mut self` and live
+            // only within this iteration — they are dead before the next
+            // `.await` so they never appear in the generator state.
+            let recv_buf: *const [u8] = &self.recv_buf[..n];
+            #[cfg(feature = "v3")]
+            let security: *mut Option<v3::Security> = &mut self.security;
+
             let pdu = Pdu::from_bytes_inner(
-                // SAFETY: recv_buf[..n] was filled by the recv call.
-                unsafe { &(&*recv_buf)[..n] },
+                // SAFETY: recv_buf[..n] was filled by the recv call above.
+                unsafe { &*recv_buf },
                 #[cfg(feature = "v3")]
-                // SAFETY: security is valid and disjoint from other accesses.
+                // SAFETY: security is valid and field-disjoint from recv_buf.
                 unsafe {
                     (*security).as_mut()
                 },
@@ -257,7 +263,7 @@ impl AsyncSession {
                 resp = Some(pdu);
                 break;
             }
-            // pdu dropped here — borrow released for the next iteration
+            // pdu, recv_buf, security drop here — borrows released
         }
 
         resp.ok_or(Error::Receive)
