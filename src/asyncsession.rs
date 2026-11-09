@@ -216,7 +216,7 @@ impl AsyncSession {
     /// the receive up to once when a stale (pre-`req_id`) packet arrives,
     /// and returns a parsed [`Pdu`] directly. The response is accepted only
     /// when its request ID is >= the current `req_id` (wrapping comparison).
-    async fn send_and_recv_retry<'a>(&mut self, retries: Option<usize>) -> Result<Pdu<'a>> {
+    async fn send_and_recv_retry<'a>(&'a mut self, retries: Option<usize>) -> Result<Pdu<'a>> {
         let max_retries = retries.unwrap_or(3);
         match self.socket.send(&self.send_pdu).await {
             Ok(size) if size == self.send_pdu.len() => {}
