@@ -205,6 +205,11 @@ impl AsyncSession {
         }
     }
 
+    /// Increment the sequence number manually when giving up on retries.
+    pub fn increase_req_id(&mut self) {
+        self.req_id += Wrapping(1);
+    }
+
     /// Sends the pre-built `send_pdu` and receives the matching response.
     ///
     /// Unlike [`send_and_recv`] which returns raw bytes, this method retries
